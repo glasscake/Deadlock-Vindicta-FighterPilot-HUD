@@ -230,7 +230,7 @@
     lockPanel.SetImage("s2r://panorama/images/hud/crosshair/lock_psd.vtex");
     lockPanel.style.horizontalAlign = "center";
     lockPanel.style.verticalAlign = "center";
-    lockPanel.style.transform = "translateY(40px)"; // Positioned 40px beneath center reticle
+    lockPanel.style.transform = "translateY(50px)"; // Positioned 40px beneath center reticle
     lockPanel.style.width = "64px";
     lockPanel.style.height = "32px";
     lockPanel.style.opacity = "0.0";
@@ -240,7 +240,7 @@
     firePanel.SetImage("s2r://panorama/images/hud/crosshair/fire_psd.vtex");
     firePanel.style.horizontalAlign = "center";
     firePanel.style.verticalAlign = "center";
-    firePanel.style.transform = "translateY(40px)"; // Positioned 40px beneath center reticle
+    firePanel.style.transform = "translateY(50px)"; // Positioned 40px beneath center reticle
     firePanel.style.width = "64px";
     firePanel.style.height = "32px";
     firePanel.style.opacity = "0.0";
@@ -324,14 +324,14 @@
                     var isFullyLocked = normalizedProgress <= 0.05; // 95%+ fully closed
                     
                     if (!isFullyLocked) {
-                      // LOCK Phase: Flash every 0.75 seconds (750ms)
-                      var lockFlashOn = (now % 750) < 375;
+                      // LOCK Phase: Starts instantly on aim and flashes every 0.60 seconds (600ms)
+                      var lockFlashOn = (now % 350) < 175;
                       statusText.lock.style.washColor = "#00FF66";
                       statusText.lock.style.imgShadow = g_cachedCrtShadow;
                       statusText.lock.style.opacity = lockFlashOn ? "1.0" : "0.0";
                       statusText.fire.style.opacity = "0.0";
                     } else {
-                      // FIRE Phase: Flash every 0.25 seconds (250ms)
+                      // FIRE Phase: Flashes every 0.25 seconds (250ms) when fully closed
                       var fireFlashOn = (now % 250) < 125;
                       statusText.fire.style.washColor = "#00FF66";
                       statusText.fire.style.imgShadow = g_cachedCrtShadow;
