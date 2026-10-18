@@ -5,6 +5,8 @@
     [
         panorama:"file://{images}/hud/crosshair/chevron_left.psd",
         panorama:"file://{images}/hud/crosshair/chevron_right.psd",
-        panorama:"file://{images}/hud/crosshair/Crosshair.psd"
+        panorama:"file://{images}/hud/crosshair/Crosshair.psd",
+        panorama:"file://{images}/hud/crosshair/lock.psd",
+        panorama:"file://{images}/hud/crosshair/fire.psd"
     ]
 }

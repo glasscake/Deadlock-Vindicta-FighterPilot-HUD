@@ -29,7 +29,22 @@
   var g_isMaskHidden = false;
 
   var g_prevRawProgress = 0.0;
-  var g_isRechargePhase = false;
+  var g_lastFlickerTime = 0;
+  var g_cachedCrtShadow = "0px 0px 7.0px 1.0 #39FF14FF";
+
+  var g_statusLock = null;
+  var g_statusFire = null;
+  var g_lastStatusFlashTime = 0;
+
+
+
+  function IsValidPanel(p) {
+    try {
+      return p && p.IsValid && p.IsValid();
+    } catch (e) {
+      return false;
+    }
+  }
 
   function FindHudRoot() {
     var current = g_progressElement;
@@ -37,11 +52,21 @@
       if (current.id === "CitadelHudRoot") return current;
       current = current.GetParent();
     }
+    try {
+      var uiRoot = $.GetContextPanel();
+      while (uiRoot && uiRoot.GetParent()) {
+        uiRoot = uiRoot.GetParent();
+      }
+      if (uiRoot) {
+        var localHud = uiRoot.FindChildTraverse("CitadelHudRoot");
+        if (localHud) return localHud;
+      }
+    } catch (e) {}
     return null;
   }
 
   function GetHudRoot() {
-    if (!g_hudRoot || !g_hudRoot.IsValid()) g_hudRoot = FindHudRoot();
+    if (!IsValidPanel(g_hudRoot)) g_hudRoot = FindHudRoot();
     return g_hudRoot;
   }
 
@@ -63,6 +88,7 @@
       if (found || !panel || depth > 20) return;
       var id = "";
       try { id = panel.id || ""; } catch (e) {}
+
       if (ExtractHeroFromId(id)) {
         found = panel;
         return;
@@ -91,15 +117,11 @@
       g_lastHeroRecheckTime = now;
       return ForceRedetectHero(root);
     }
-    if (g_meleeAbilityPanel && g_meleeAbilityPanel.IsValid && g_meleeAbilityPanel.IsValid()) {
+    if (IsValidPanel(g_meleeAbilityPanel)) {
       var hero = ExtractHeroFromId(g_meleeAbilityPanel.id || "");
       if (hero) return hero;
     }
     return ForceRedetectHero(root);
-  }
-
-  function IsValidPanel(p) {
-    return p && p.IsValid && p.IsValid();
   }
 
   function GetLocalProgressPanels() {
@@ -120,7 +142,7 @@
   function ReadProgressValue(localProgress) {
     if (localProgress.value !== undefined) return { value: localProgress.value, source: "value" };
     if (localProgress.progress !== undefined) return { value: localProgress.progress, source: "progress" };
-    if (localProgress.style.clip) {
+    if (localProgress.style && localProgress.style.clip) {
       var matches = localProgress.style.clip.match(/(\d+(\.\d+)?)deg/g);
       if (matches && matches.length > 0) {
         var endAngleDeg = parseFloat(matches[matches.length - 1]);
@@ -130,34 +152,7 @@
     return { value: 0.0, source: "fallback-zero" };
   }
 
-  function HideNativeProgress(localProgress, localBacker) {
-    if (g_isNativeHidden) return;
-    var changed = false;
-    if (localProgress && localProgress.style.visibility !== "collapse") {
-      localProgress.style.visibility = "collapse";
-      changed = true;
-    }
-    if (localBacker && localBacker.style.visibility !== "collapse") {
-      localBacker.style.visibility = "collapse";
-      changed = true;
-    }
-    if (changed) g_isNativeHidden = true;
-  }
-
-  function RestoreNativeProgress(localProgress, localBacker) {
-    var changed = false;
-    if (localProgress && localProgress.style.visibility === "collapse") {
-      localProgress.style.visibility = null;
-      changed = true;
-    }
-    if (localBacker && localBacker.style.visibility === "collapse") {
-      localBacker.style.visibility = null;
-      changed = true;
-    }
-    if (changed) g_isNativeHidden = false;
-  }
-
-function GetOrCreateChevronPanels(scopeImg) {
+  function GetOrCreateChevronPanels(scopeImg) {
     if (IsValidPanel(g_chevronLeft) && IsValidPanel(g_chevronRight)) {
       return { left: g_chevronLeft, right: g_chevronRight };
     }
@@ -176,9 +171,6 @@ function GetOrCreateChevronPanels(scopeImg) {
     left.style.width = "128px";
     left.style.height = "128px";
     left.style.opacity = "0.0";
-    left.style.washColor = "#00FF66";
-    // Toned-down glow: 8px blur radius, 1.0 strength multiplier
-    left.style.imgShadow = "0px 0px 8px 1.0 #39FF14";
 
     var right = $.CreatePanel("Image", scopeImg, "VindictaChevronRight");
     right.SetImage("s2r://panorama/images/hud/crosshair/chevron_right_psd.vtex");
@@ -187,27 +179,75 @@ function GetOrCreateChevronPanels(scopeImg) {
     right.style.width = "128px";
     right.style.height = "128px";
     right.style.opacity = "0.0";
-    right.style.washColor = "#00FF66";
-    right.style.imgShadow = "0px 0px 8px 1.0 #39FF14";
 
     g_chevronLeft = left;
     g_chevronRight = right;
     return { left: g_chevronLeft, right: g_chevronRight };
   }
 
-  function MaybeLogDebug(hero, progressInfo, scopeImgFound, localProgressFound, root) {
-    if (!DEBUG) return;
-    var now = Date.now() / 1000.0;
-    if ((now - g_lastDebugLogTime) < DEBUG_LOG_INTERVAL) return;
-    g_lastDebugLogTime = now;
-    $.Msg(
-      "[VindictaMask] root=" + (root ? "found" : "NULL") +
-      " hero=" + (hero || "NULL") +
-      " local_progress=" + (localProgressFound ? "found" : "NULL") +
-      " scope_img=" + (scopeImgFound ? "found" : "NULL") +
-      " progress=" + progressInfo.value.toFixed(3) +
-      " (source: " + progressInfo.source + ")"
-    );
+  function HideNativeProgress(localProgress, localBacker) {
+    if (g_isNativeHidden) return;
+    var changed = false;
+    if (localProgress && localProgress.style && localProgress.style.visibility !== "collapse") {
+      localProgress.style.visibility = "collapse";
+      changed = true;
+    }
+    if (localBacker && localBacker.style && localBacker.style.visibility !== "collapse") {
+      localBacker.style.visibility = "collapse";
+      changed = true;
+    }
+    if (changed) g_isNativeHidden = true;
+  }
+
+  function RestoreNativeProgress(localProgress, localBacker) {
+    var changed = false;
+    if (localProgress && localProgress.style && localProgress.style.visibility === "collapse") {
+      localProgress.style.visibility = null;
+      changed = true;
+    }
+    if (localBacker && localBacker.style && localBacker.style.visibility === "collapse") {
+      localBacker.style.visibility = null;
+      changed = true;
+    }
+    if (changed) g_isNativeHidden = false;
+  }
+
+  function GetOrCreateStatusPanels(scopeImg) {
+    if (IsValidPanel(g_statusLock) && IsValidPanel(g_statusFire)) {
+      return { lock: g_statusLock, fire: g_statusFire };
+    }
+
+    var existingLock = scopeImg.FindChildTraverse("VindictaStatusLock");
+    var existingFire = scopeImg.FindChildTraverse("VindictaStatusFire");
+    if (existingLock && existingFire) {
+      g_statusLock = existingLock;
+      g_statusFire = existingFire;
+      return { lock: g_statusLock, fire: g_statusFire };
+    }
+
+    // LOCK text graphic
+    var lockPanel = $.CreatePanel("Image", scopeImg, "VindictaStatusLock");
+    lockPanel.SetImage("s2r://panorama/images/hud/crosshair/lock_psd.vtex");
+    lockPanel.style.horizontalAlign = "center";
+    lockPanel.style.verticalAlign = "center";
+    lockPanel.style.transform = "translateY(40px)"; // Positioned 40px beneath center reticle
+    lockPanel.style.width = "64px";
+    lockPanel.style.height = "32px";
+    lockPanel.style.opacity = "0.0";
+
+    // FIRE text graphic
+    var firePanel = $.CreatePanel("Image", scopeImg, "VindictaStatusFire");
+    firePanel.SetImage("s2r://panorama/images/hud/crosshair/fire_psd.vtex");
+    firePanel.style.horizontalAlign = "center";
+    firePanel.style.verticalAlign = "center";
+    firePanel.style.transform = "translateY(40px)"; // Positioned 40px beneath center reticle
+    firePanel.style.width = "64px";
+    firePanel.style.height = "32px";
+    firePanel.style.opacity = "0.0";
+
+    g_statusLock = lockPanel;
+    g_statusFire = firePanel;
+    return { lock: g_statusLock, fire: g_statusFire };
   }
 
   function SyncLoop() {
@@ -226,12 +266,11 @@ function GetOrCreateChevronPanels(scopeImg) {
               var scopeImg = GetScopeImg(root);
               if (scopeImg) {
                 var chevrons = GetOrCreateChevronPanels(scopeImg);
+                var statusText = GetOrCreateStatusPanels(scopeImg);
                 
-                // Sanitize progress value to prevent NaN math errors
                 var rawVal = progressInfo.value;
                 var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
 
-                // Detect if progress value is climbing (0 -> 1) or falling (1 -> 0)
                 var isClimbing = nextOpacity >= g_prevRawProgress;
                 g_prevRawProgress = nextOpacity;
 
@@ -248,16 +287,17 @@ function GetOrCreateChevronPanels(scopeImg) {
 
                 if (isAiming) nextInterval = ACTIVE_INTERVAL;
 
-                // Generate CRT jitter values on every frame
-                var baseBlur = 8;
-                var blurJitter = (Math.random() * 3.0) - 1.5; // Jitter between -1.5px and +1.5px
-                var currentBlur = (baseBlur + blurJitter).toFixed(1);
+                // CRT Flicker timing engine
+                var now = Date.now();
+                if (!g_lastFlickerTime || (now - g_lastFlickerTime) > 30) {
+                  g_lastFlickerTime = now;
+                  var baseBlur = 7.0;
+                  var blurJitter = (Math.random() * 1.6) - 0.8;
+                  var currentBlur = (baseBlur + blurJitter).toFixed(1);
+                  var flickerAlpha = (Math.random() > 0.88) ? "E6" : "FF"; 
+                  g_cachedCrtShadow = "0px 0px " + currentBlur + "px 1.0 #39FF14" + flickerAlpha;
+                }
 
-                // Subtle alpha flicker (10% - 15% opacity drop on occasional frames)
-                var flickerAlpha = (Math.random() > 0.85) ? "CC" : "FF"; 
-                var crtShadowStyle = "0px 0px " + currentBlur + "px 1.0 #39FF14" + flickerAlpha;
-
-                // Force frame re-render for flickering even if progress is static
                 var progressChanged = Math.abs(g_lastOpacity - nextOpacity) > 0.002;
                 if (progressChanged || g_lastAimingState !== isAiming || isAiming) {
                   var MAX_PIXEL_OFFSET = 180;
@@ -268,23 +308,45 @@ function GetOrCreateChevronPanels(scopeImg) {
                   if (isAiming) {
                     scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
                     scopeImg.style.washColor = "#00FF66";
-                    scopeImg.style.imgShadow = crtShadowStyle;
+                    scopeImg.style.imgShadow = g_cachedCrtShadow;
 
                     chevrons.left.style.washColor = "#00FF66";
                     chevrons.right.style.washColor = "#00FF66";
-                    chevrons.left.style.imgShadow = crtShadowStyle;
-                    chevrons.right.style.imgShadow = crtShadowStyle;
+                    chevrons.left.style.imgShadow = g_cachedCrtShadow;
+                    chevrons.right.style.imgShadow = g_cachedCrtShadow;
 
                     chevrons.left.style.opacity = "1.0";
                     chevrons.right.style.opacity = "1.0";
                     chevrons.left.style.transform = "translateX(" + (-currentOffset) + "px)";
                     chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
+
+                    // Status Indicator Logic (LOCK / FIRE)
+                    var isFullyLocked = normalizedProgress <= 0.05; // 95%+ fully closed
+                    
+                    if (!isFullyLocked) {
+                      // LOCK Phase: Flash every 0.75 seconds (750ms)
+                      var lockFlashOn = (now % 750) < 375;
+                      statusText.lock.style.washColor = "#00FF66";
+                      statusText.lock.style.imgShadow = g_cachedCrtShadow;
+                      statusText.lock.style.opacity = lockFlashOn ? "1.0" : "0.0";
+                      statusText.fire.style.opacity = "0.0";
+                    } else {
+                      // FIRE Phase: Flash every 0.25 seconds (250ms)
+                      var fireFlashOn = (now % 250) < 125;
+                      statusText.fire.style.washColor = "#00FF66";
+                      statusText.fire.style.imgShadow = g_cachedCrtShadow;
+                      statusText.fire.style.opacity = fireFlashOn ? "1.0" : "0.0";
+                      statusText.lock.style.opacity = "0.0";
+                    }
+
                   } else {
                     scopeImg.style.backgroundImage = null;
                     scopeImg.style.washColor = null;
                     scopeImg.style.imgShadow = null;
                     chevrons.left.style.opacity = "0.0";
                     chevrons.right.style.opacity = "0.0";
+                    statusText.lock.style.opacity = "0.0";
+                    statusText.fire.style.opacity = "0.0";
                   }
 
                   g_lastOpacity = nextOpacity;
@@ -292,10 +354,6 @@ function GetOrCreateChevronPanels(scopeImg) {
                   g_isMaskHidden = !isAiming;
                 }
               }
-
-              MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
-            } else {
-              MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
             }
           } else {
             if (IsValidPanel(g_scopeImg)) {
@@ -306,6 +364,8 @@ function GetOrCreateChevronPanels(scopeImg) {
             if (IsValidPanel(g_chevronLeft) && !g_isMaskHidden) {
               g_chevronLeft.style.opacity = "0.0";
               g_chevronRight.style.opacity = "0.0";
+              if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
+              if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
               g_isMaskHidden = true;
               g_lastOpacity = 0.0;
               g_lastAimingState = false;
@@ -323,17 +383,20 @@ function GetOrCreateChevronPanels(scopeImg) {
     g_schedulerId = $.Schedule(nextInterval, SyncLoop);
   }
 
-
-  function Cleanup() {
+function Cleanup() {
     if (g_schedulerId) {
       $.CancelScheduled(g_schedulerId);
       g_schedulerId = null;
     }
     if (IsValidPanel(g_chevronLeft)) g_chevronLeft.DeleteAsync(0);
     if (IsValidPanel(g_chevronRight)) g_chevronRight.DeleteAsync(0);
+    if (IsValidPanel(g_statusLock)) g_statusLock.DeleteAsync(0);
+    if (IsValidPanel(g_statusFire)) g_statusFire.DeleteAsync(0);
     
     g_chevronLeft = null;
     g_chevronRight = null;
+    g_statusLock = null;
+    g_statusFire = null;
     g_hudRoot = null;
     g_meleeAbilityPanel = null;
     g_scopeImg = null;
@@ -345,6 +408,7 @@ function GetOrCreateChevronPanels(scopeImg) {
     g_lastAimingState = false;
     g_isNativeHidden = false;
     g_isMaskHidden = false;
+    g_prevRawProgress = 0.0;
   }
 
   if (typeof $ !== "undefined" && $.RegisterForUnload) {
