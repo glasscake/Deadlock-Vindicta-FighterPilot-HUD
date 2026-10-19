@@ -7,6 +7,8 @@
         panorama:"file://{images}/hud/crosshair/chevron_right.psd",
         panorama:"file://{images}/hud/crosshair/Crosshair.psd",
         panorama:"file://{images}/hud/crosshair/lock.psd",
-        panorama:"file://{images}/hud/crosshair/fire.psd"
+        panorama:"file://{images}/hud/crosshair/fire.psd",
+        panorama:"file://{images}/hud/crosshair/ladder.psd",
+        panorama:"file://{images}/hud/crosshair/compass.psd"
     ]
 }

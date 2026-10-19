@@ -28,15 +28,19 @@
   var g_isNativeHidden = false;
   var g_isMaskHidden = false;
 
+  // Flickering and glow variables
   var g_prevRawProgress = 0.0;
   var g_lastFlickerTime = 0;
   var g_cachedCrtShadow = "0px 0px 7.0px 1.0 #39FF14FF";
 
+  // Lock and fire flashing variables
   var g_statusLock = null;
   var g_statusFire = null;
   var g_lastStatusFlashTime = 0;
 
-
+  // Compass variables
+  var g_compassPanel = null;
+  var g_minimapMainImage = null;
 
   function IsValidPanel(p) {
     try {
@@ -48,14 +52,18 @@
 
   function FindHudRoot() {
     var current = g_progressElement;
-    while (current) {
+    var depthLimit = 20;
+    while (current && depthLimit > 0) {
       if (current.id === "CitadelHudRoot") return current;
       current = current.GetParent();
+      depthLimit--;
     }
     try {
       var uiRoot = $.GetContextPanel();
-      while (uiRoot && uiRoot.GetParent()) {
+      var rootDepth = 20;
+      while (uiRoot && uiRoot.GetParent() && rootDepth > 0) {
         uiRoot = uiRoot.GetParent();
+        rootDepth--;
       }
       if (uiRoot) {
         var localHud = uiRoot.FindChildTraverse("CitadelHudRoot");
@@ -101,6 +109,67 @@
     }
     Search(root, 0);
     return found;
+  }
+
+  function GetMinimapYaw(root) {
+    try {
+      if (!IsValidPanel(g_minimapMainImage)) {
+        var minimap = root.FindChildTraverse("hud_minimap");
+        if (minimap) {
+          g_minimapMainImage = minimap.FindChildTraverse("MainImage");
+        }
+      }
+
+      if (IsValidPanel(g_minimapMainImage)) {
+        var m = g_minimapMainImage;
+        var styleStr = (m.style && m.style.transform) ? m.style.transform : "";
+        if (styleStr) {
+          var matches = styleStr.match(/rotate3d\s*\(\s*(-?\d+(?:\.\d+)?)deg\s*,\s*(-?\d+(?:\.\d+)?)deg\s*,\s*(-?\d+(?:\.\d+)?)deg\s*\)/i);
+          if (matches && matches.length >= 4) {
+            var yawDeg = parseFloat(matches[2]); 
+            if (!isNaN(yawDeg)) return yawDeg;
+          }
+          var fallbackMatches = styleStr.match(/rotate[YZ]\s*\(\s*(-?\d+(?:\.\d+)?)deg\s*\)/i);
+          if (fallbackMatches && fallbackMatches[1]) {
+            return parseFloat(fallbackMatches[1]);
+          }
+        }
+      }
+    } catch (e) {}
+
+    return 0.0;
+  }
+
+function GetOrCreateCompassPanel(root) {
+    if (IsValidPanel(g_compassPanel)) return g_compassPanel;
+
+    var existing = root.FindChildTraverse("VindictaCompassTape");
+    if (existing) {
+      g_compassPanel = existing;
+      return g_compassPanel;
+    }
+
+    var panel = $.CreatePanel("Image", root, "VindictaCompassTape");
+    panel.SetImage("s2r://panorama/images/hud/crosshair/compass_psd.vtex");
+    
+    panel.style.horizontalAlign = "center";
+    panel.style.verticalAlign = "top";
+    panel.style.marginTop = "150px";       
+    
+    panel.style.width = "4872px";         
+    panel.style.height = "45px";          
+    panel.style.minWidth = "4872px";      
+    panel.style.maxWidth = "4872px";
+    
+    panel.style.overflow = "noclip";      
+    panel.style.visibility = "collapse";  
+    panel.style.opacity = "0.0";
+    
+    // Native C++ render flag to definitively hide it on creation
+    panel.visible = false;
+
+    g_compassPanel = panel;
+    return g_compassPanel;
   }
 
   function ForceRedetectHero(root) {
@@ -185,30 +254,37 @@
     return { left: g_chevronLeft, right: g_chevronRight };
   }
 
-  function HideNativeProgress(localProgress, localBacker) {
-    if (g_isNativeHidden) return;
+function HideNativeProgress(localProgress, localBacker) {
     var changed = false;
-    if (localProgress && localProgress.style && localProgress.style.visibility !== "collapse") {
-      localProgress.style.visibility = "collapse";
+    
+    // Use 0.001 opacity. This makes it invisible to the human eye, but the 
+    // engine still thinks it's rendering on-screen and will keep updating the value!
+    if (localProgress && localProgress.style && localProgress.style.opacity !== "0.001") {
+      localProgress.style.opacity = "0.001";
+      localProgress.style.transform = null; // Clear any old off-screen transforms
       changed = true;
     }
-    if (localBacker && localBacker.style && localBacker.style.visibility !== "collapse") {
-      localBacker.style.visibility = "collapse";
+    if (localBacker && localBacker.style && localBacker.style.opacity !== "0.001") {
+      localBacker.style.opacity = "0.001";
+      localBacker.style.transform = null;
       changed = true;
     }
+    
     if (changed) g_isNativeHidden = true;
   }
 
   function RestoreNativeProgress(localProgress, localBacker) {
     var changed = false;
-    if (localProgress && localProgress.style && localProgress.style.visibility === "collapse") {
-      localProgress.style.visibility = null;
+    
+    if (localProgress && localProgress.style && localProgress.style.opacity === "0.001") {
+      localProgress.style.opacity = "1.0";
       changed = true;
     }
-    if (localBacker && localBacker.style && localBacker.style.visibility === "collapse") {
-      localBacker.style.visibility = null;
+    if (localBacker && localBacker.style && localBacker.style.opacity === "0.001") {
+      localBacker.style.opacity = "1.0";
       changed = true;
     }
+    
     if (changed) g_isNativeHidden = false;
   }
 
@@ -225,22 +301,20 @@
       return { lock: g_statusLock, fire: g_statusFire };
     }
 
-    // LOCK text graphic
     var lockPanel = $.CreatePanel("Image", scopeImg, "VindictaStatusLock");
     lockPanel.SetImage("s2r://panorama/images/hud/crosshair/lock_psd.vtex");
     lockPanel.style.horizontalAlign = "center";
     lockPanel.style.verticalAlign = "center";
-    lockPanel.style.transform = "translateY(50px)"; // Positioned 40px beneath center reticle
+    lockPanel.style.transform = "translateY(50px)";
     lockPanel.style.width = "64px";
     lockPanel.style.height = "32px";
     lockPanel.style.opacity = "0.0";
 
-    // FIRE text graphic
     var firePanel = $.CreatePanel("Image", scopeImg, "VindictaStatusFire");
     firePanel.SetImage("s2r://panorama/images/hud/crosshair/fire_psd.vtex");
     firePanel.style.horizontalAlign = "center";
     firePanel.style.verticalAlign = "center";
-    firePanel.style.transform = "translateY(50px)"; // Positioned 40px beneath center reticle
+    firePanel.style.transform = "translateY(50px)";
     firePanel.style.width = "64px";
     firePanel.style.height = "32px";
     firePanel.style.opacity = "0.0";
@@ -250,7 +324,21 @@
     return { lock: g_statusLock, fire: g_statusFire };
   }
 
-  function SyncLoop() {
+  function MaybeLogDebug(hero, progressInfo, scopeImgFound, localProgressFound, root) {
+    if (!DEBUG) return;
+    var now = Date.now() / 1000.0;
+    if ((now - g_lastDebugLogTime) < DEBUG_LOG_INTERVAL) return;
+    g_lastDebugLogTime = now;
+    $.Msg(
+      "[VindictaMask] root=" + (root ? "found" : "NULL") +
+      " hero=" + (hero || "NULL") +
+      " local_progress=" + (localProgressFound ? "found" : "NULL") +
+      " scope_img=" + (scopeImgFound ? "found" : "NULL") +
+      " progress=" + (progressInfo ? progressInfo.value.toFixed(3) : "N/A")
+    );
+  }
+
+function SyncLoop() {
     var nextInterval = IDLE_INTERVAL;
     try {
       if (IsValidPanel(g_progressElement)) {
@@ -261,6 +349,57 @@
             var panels = GetLocalProgressPanels();
             if (panels.progress) {
               var progressInfo = ReadProgressValue(panels.progress);
+              
+              // EARLY SANITY CHECK: Calculate aim state immediately
+              var rawVal = progressInfo.value;
+              var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
+              var isAiming = nextOpacity > 0.0;
+
+              // ENGINE FAILSAFE 1: Deep visibility checks (checks inherited engine visibility)
+              try {
+                if (g_progressElement && (g_progressElement.style.visibility === "collapse" || g_progressElement.BHasClass("Hidden") || g_progressElement.actualvisibility === "collapse" || g_progressElement.visible === false)) {
+                  isAiming = false;
+                }
+                var tempScope = GetScopeImg(root);
+                if (tempScope && (tempScope.style.visibility === "collapse" || tempScope.BHasClass("Hidden") || tempScope.actualvisibility === "collapse" || tempScope.visible === false)) {
+                  isAiming = false;
+                }
+              } catch (e) {}
+
+              // ENGINE FAILSAFE 2: Freeze Detection
+              // The scope animation never pauses mid-climb. If it freezes at a fractional value 
+              // for more than some amount of frames, the game engine has culled the panel.
+              if (isAiming && nextOpacity > 0.0 && nextOpacity < 1.0) {
+                if (nextOpacity === g_prevRawProgress) {
+                  SyncLoop.stuckFrames = (SyncLoop.stuckFrames || 0) + 1;
+                  if (SyncLoop.stuckFrames > 6) {
+                    isAiming = false;
+                  }
+                } else {
+                  SyncLoop.stuckFrames = 0;
+                }
+              } else {
+                SyncLoop.stuckFrames = 0;
+              }
+
+              // DEBUG: Log state transitions
+              if (g_lastAimingState !== isAiming) {
+                $.Msg("[VindictaDebug] Aim state changed -> isAiming: " + isAiming + " | Opacity: " + nextOpacity.toFixed(3));
+              }
+
+              // If not aiming, actively hunt down any leftover compass panel by ID and destroy it
+              if (!isAiming) {
+                var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
+                if (rogueCompass) {
+                  $.Msg("[VindictaDebug] SANITY CHECK: Found rogue compass on screen while not aiming! Deleting it.");
+                  rogueCompass.DeleteAsync(0);
+                }
+                if (typeof g_compassPanel !== 'undefined' && g_compassPanel !== null) {
+                  $.Msg("[VindictaDebug] SANITY CHECK: Script memory cleared of old compass reference.");
+                  g_compassPanel = null;
+                }
+              }
+
               HideNativeProgress(panels.progress, panels.backer);
 
               var scopeImg = GetScopeImg(root);
@@ -268,26 +407,11 @@
                 var chevrons = GetOrCreateChevronPanels(scopeImg);
                 var statusText = GetOrCreateStatusPanels(scopeImg);
                 
-                var rawVal = progressInfo.value;
-                var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
-
                 var isClimbing = nextOpacity >= g_prevRawProgress;
                 g_prevRawProgress = nextOpacity;
 
-                var isAiming = nextOpacity > 0.0;
-                if (!isAiming) {
-                  try {
-                    var vis = scopeImg.style.visibility;
-                    var actVis = scopeImg.actualvisibility;
-                    if (vis !== "collapse" && actVis !== "collapse") {
-                      isAiming = true;
-                    }
-                  } catch (e) {}
-                }
-
                 if (isAiming) nextInterval = ACTIVE_INTERVAL;
 
-                // CRT Flicker timing engine
                 var now = Date.now();
                 if (!g_lastFlickerTime || (now - g_lastFlickerTime) > 30) {
                   g_lastFlickerTime = now;
@@ -306,6 +430,30 @@
                   var currentOffset = MAX_PIXEL_OFFSET * normalizedProgress;
 
                   if (isAiming) {
+                    var compass = GetOrCreateCompassPanel(root);
+                    if (g_lastAimingState !== isAiming) {
+                      $.Msg("[VindictaDebug] Creating/Retrieving Compass. IsValid: " + IsValidPanel(compass));
+                    }
+                    
+                    var currentYaw = GetMinimapYaw(root) - 90.0; 
+
+                    if (currentYaw > 180) currentYaw -= 360;
+                    if (currentYaw < -180) currentYaw += 360;
+
+                    var TOTAL_DEGREES = 720; 
+                    var IMAGE_WIDTH_PX = 4872;
+                    var PX_PER_DEGREE = IMAGE_WIDTH_PX / TOTAL_DEGREES;
+
+                    var compassOffsetPx = currentYaw * PX_PER_DEGREE;
+
+                    compass.style.washColor = "#00FF66";
+                    compass.style.imgShadow = g_cachedCrtShadow;
+                    
+                    compass.visible = true;
+                    compass.style.visibility = "visible";
+                    compass.style.opacity = "1.0";
+                    compass.style.transform = "translateX(" + (-compassOffsetPx) + "px)";
+
                     scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
                     scopeImg.style.washColor = "#00FF66";
                     scopeImg.style.imgShadow = g_cachedCrtShadow;
@@ -320,18 +468,15 @@
                     chevrons.left.style.transform = "translateX(" + (-currentOffset) + "px)";
                     chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
 
-                    // Status Indicator Logic (LOCK / FIRE)
-                    var isFullyLocked = normalizedProgress <= 0.05; // 95%+ fully closed
+                    var isFullyLocked = normalizedProgress <= 0.05;
                     
                     if (!isFullyLocked) {
-                      // LOCK Phase: Starts instantly on aim and flashes every 0.60 seconds (600ms)
                       var lockFlashOn = (now % 350) < 175;
                       statusText.lock.style.washColor = "#00FF66";
                       statusText.lock.style.imgShadow = g_cachedCrtShadow;
                       statusText.lock.style.opacity = lockFlashOn ? "1.0" : "0.0";
                       statusText.fire.style.opacity = "0.0";
                     } else {
-                      // FIRE Phase: Flashes every 0.25 seconds (250ms) when fully closed
                       var fireFlashOn = (now % 250) < 125;
                       statusText.fire.style.washColor = "#00FF66";
                       statusText.fire.style.imgShadow = g_cachedCrtShadow;
@@ -340,13 +485,20 @@
                     }
 
                   } else {
+                    // Nuke the panel entirely so it physically cannot render
+                    if (IsValidPanel(g_compassPanel)) {
+                      $.Msg("[VindictaDebug] Main loop stop. Nuking tracked compass panel.");
+                      g_compassPanel.DeleteAsync(0);
+                      g_compassPanel = null;
+                    }
+                    
                     scopeImg.style.backgroundImage = null;
                     scopeImg.style.washColor = null;
                     scopeImg.style.imgShadow = null;
                     chevrons.left.style.opacity = "0.0";
                     chevrons.right.style.opacity = "0.0";
-                    statusText.lock.style.opacity = "0.0";
-                    statusText.fire.style.opacity = "0.0";
+                    if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
+                    if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
                   }
 
                   g_lastOpacity = nextOpacity;
@@ -354,6 +506,10 @@
                   g_isMaskHidden = !isAiming;
                 }
               }
+
+              MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
+            } else {
+              MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
             }
           } else {
             if (IsValidPanel(g_scopeImg)) {
@@ -361,11 +517,25 @@
               g_scopeImg.style.washColor = null;
               g_scopeImg.style.imgShadow = null;
             }
-            if (IsValidPanel(g_chevronLeft) && !g_isMaskHidden) {
-              g_chevronLeft.style.opacity = "0.0";
-              g_chevronRight.style.opacity = "0.0";
+            
+            // Actively hunt and destroy if we switched off Vindicta
+            var strayCompass = root.FindChildTraverse("VindictaCompassTape");
+            if (strayCompass) {
+              $.Msg("[VindictaDebug] Switched Hero: Found and destroyed stray compass.");
+              strayCompass.DeleteAsync(0);
+            }
+            if (IsValidPanel(g_compassPanel)) {
+              $.Msg("[VindictaDebug] Switched Hero: Destroyed tracked compass.");
+              g_compassPanel.DeleteAsync(0);
+              g_compassPanel = null;
+            }
+            
+            if (!g_isMaskHidden) {
+              if (IsValidPanel(g_chevronLeft)) g_chevronLeft.style.opacity = "0.0";
+              if (IsValidPanel(g_chevronRight)) g_chevronRight.style.opacity = "0.0";
               if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
               if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
+              
               g_isMaskHidden = true;
               g_lastOpacity = 0.0;
               g_lastAimingState = false;
@@ -383,7 +553,7 @@
     g_schedulerId = $.Schedule(nextInterval, SyncLoop);
   }
 
-function Cleanup() {
+  function Cleanup() {
     if (g_schedulerId) {
       $.CancelScheduled(g_schedulerId);
       g_schedulerId = null;
@@ -392,11 +562,13 @@ function Cleanup() {
     if (IsValidPanel(g_chevronRight)) g_chevronRight.DeleteAsync(0);
     if (IsValidPanel(g_statusLock)) g_statusLock.DeleteAsync(0);
     if (IsValidPanel(g_statusFire)) g_statusFire.DeleteAsync(0);
+    if (IsValidPanel(g_compassPanel)) g_compassPanel.DeleteAsync(0);
     
     g_chevronLeft = null;
     g_chevronRight = null;
     g_statusLock = null;
     g_statusFire = null;
+    g_compassPanel = null;
     g_hudRoot = null;
     g_meleeAbilityPanel = null;
     g_scopeImg = null;
