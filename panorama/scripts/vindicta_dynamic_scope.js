@@ -472,7 +472,7 @@ function SyncLoop() {
                   if (isAiming) {
                     var compass = GetOrCreateCompassPanel(root);
                     
-                    var currentYaw = GetMinimapYaw(root) - 90.0; 
+                    var currentYaw = GetMinimapYaw(root) + 90.0; 
                     if (currentYaw > 180) currentYaw -= 360;
                     if (currentYaw < -180) currentYaw += 360;
 
