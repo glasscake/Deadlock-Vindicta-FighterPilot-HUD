@@ -42,6 +42,10 @@
   var g_compassPanel = null;
   var g_minimapMainImage = null;
 
+  //lleft and right ladders
+  var g_ladderLeft = null;
+  var g_ladderRight = null;
+
   function IsValidPanel(p) {
     try {
       return p && p.IsValid && p.IsValid();
@@ -170,6 +174,48 @@ function GetOrCreateCompassPanel(root) {
 
     g_compassPanel = panel;
     return g_compassPanel;
+  }
+
+
+  function GetOrCreateLadderPanels(root) {
+    if (IsValidPanel(g_ladderLeft) && IsValidPanel(g_ladderRight)) {
+      return { left: g_ladderLeft, right: g_ladderRight };
+    }
+
+    var existingLeft = root.FindChildTraverse("VindictaLadderLeft");
+    var existingRight = root.FindChildTraverse("VindictaLadderRight");
+    
+    if (existingLeft && existingRight) {
+      g_ladderLeft = existingLeft;
+      g_ladderRight = existingRight;
+      return { left: g_ladderLeft, right: g_ladderRight };
+    }
+
+    // Left Ladder: Centered on screen, pushed left by percentage of panel width
+    var leftPanel = $.CreatePanel("Image", root, "VindictaLadderLeft");
+    leftPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
+    leftPanel.style.horizontalAlign = "center";
+    leftPanel.style.verticalAlign = "center";
+    leftPanel.style.transform = "translateX(-30%)"; // Tweak percentage (-400%, -500%, etc.)
+    leftPanel.style.width = "76px";
+    leftPanel.style.height = "1344px";
+    leftPanel.style.opacity = "0.0";
+    leftPanel.style.overflow = "noclip";
+
+    // Right Ladder: Centered on screen, pushed right by percentage of panel width
+    var rightPanel = $.CreatePanel("Image", root, "VindictaLadderRight");
+    rightPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
+    rightPanel.style.horizontalAlign = "center";
+    rightPanel.style.verticalAlign = "center";
+    rightPanel.style.transform = "translateX(30%)"; // Tweak percentage (400%, 500%, etc.)
+    rightPanel.style.width = "76px";
+    rightPanel.style.height = "1344px";
+    rightPanel.style.opacity = "0.0";
+    rightPanel.style.overflow = "noclip";
+
+    g_ladderLeft = leftPanel;
+    g_ladderRight = rightPanel;
+    return { left: g_ladderLeft, right: g_ladderRight };
   }
 
   function ForceRedetectHero(root) {
@@ -355,7 +401,7 @@ function SyncLoop() {
               var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
               var isAiming = nextOpacity > 0.0;
 
-              // ENGINE FAILSAFE 1: Deep visibility checks (checks inherited engine visibility)
+              // ENGINE FAILSAFE 1: Deep visibility checks
               try {
                 if (g_progressElement && (g_progressElement.style.visibility === "collapse" || g_progressElement.BHasClass("Hidden") || g_progressElement.actualvisibility === "collapse" || g_progressElement.visible === false)) {
                   isAiming = false;
@@ -366,9 +412,7 @@ function SyncLoop() {
                 }
               } catch (e) {}
 
-              // ENGINE FAILSAFE 2: Freeze Detection
-              // The scope animation never pauses mid-climb. If it freezes at a fractional value 
-              // for more than some amount of frames, the game engine has culled the panel.
+              // ENGINE FAILSAFE 2: Freeze Detection (6 frames)
               if (isAiming && nextOpacity > 0.0 && nextOpacity < 1.0) {
                 if (nextOpacity === g_prevRawProgress) {
                   SyncLoop.stuckFrames = (SyncLoop.stuckFrames || 0) + 1;
@@ -382,20 +426,13 @@ function SyncLoop() {
                 SyncLoop.stuckFrames = 0;
               }
 
-              // DEBUG: Log state transitions
-              if (g_lastAimingState !== isAiming) {
-                $.Msg("[VindictaDebug] Aim state changed -> isAiming: " + isAiming + " | Opacity: " + nextOpacity.toFixed(3));
-              }
-
-              // If not aiming, actively hunt down any leftover compass panel by ID and destroy it
+              // Actively hunt down any leftover compass panel by ID and destroy it
               if (!isAiming) {
                 var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
                 if (rogueCompass) {
-                  $.Msg("[VindictaDebug] SANITY CHECK: Found rogue compass on screen while not aiming! Deleting it.");
                   rogueCompass.DeleteAsync(0);
                 }
                 if (typeof g_compassPanel !== 'undefined' && g_compassPanel !== null) {
-                  $.Msg("[VindictaDebug] SANITY CHECK: Script memory cleared of old compass reference.");
                   g_compassPanel = null;
                 }
               }
@@ -406,6 +443,9 @@ function SyncLoop() {
               if (scopeImg) {
                 var chevrons = GetOrCreateChevronPanels(scopeImg);
                 var statusText = GetOrCreateStatusPanels(scopeImg);
+                
+                // FIXED: Passing 'root' instead of 'scopeImg' so it doesn't get clipped!
+                var ladders = GetOrCreateLadderPanels(root);
                 
                 var isClimbing = nextOpacity >= g_prevRawProgress;
                 g_prevRawProgress = nextOpacity;
@@ -431,12 +471,8 @@ function SyncLoop() {
 
                   if (isAiming) {
                     var compass = GetOrCreateCompassPanel(root);
-                    if (g_lastAimingState !== isAiming) {
-                      $.Msg("[VindictaDebug] Creating/Retrieving Compass. IsValid: " + IsValidPanel(compass));
-                    }
                     
                     var currentYaw = GetMinimapYaw(root) - 90.0; 
-
                     if (currentYaw > 180) currentYaw -= 360;
                     if (currentYaw < -180) currentYaw += 360;
 
@@ -448,7 +484,6 @@ function SyncLoop() {
 
                     compass.style.washColor = "#00FF66";
                     compass.style.imgShadow = g_cachedCrtShadow;
-                    
                     compass.visible = true;
                     compass.style.visibility = "visible";
                     compass.style.opacity = "1.0";
@@ -462,11 +497,30 @@ function SyncLoop() {
                     chevrons.right.style.washColor = "#00FF66";
                     chevrons.left.style.imgShadow = g_cachedCrtShadow;
                     chevrons.right.style.imgShadow = g_cachedCrtShadow;
-
                     chevrons.left.style.opacity = "1.0";
                     chevrons.right.style.opacity = "1.0";
                     chevrons.left.style.transform = "translateX(" + (-currentOffset) + "px)";
                     chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
+
+                    // Ladders Drift Logic
+                    ladders.left.style.washColor = "#00FF66";
+                    ladders.right.style.washColor = "#00FF66";
+                    ladders.left.style.imgShadow = g_cachedCrtShadow;
+                    ladders.right.style.imgShadow = g_cachedCrtShadow;
+                    
+                    ladders.left.visible = true;
+                    ladders.right.visible = true;
+                    ladders.left.style.visibility = "visible";
+                    ladders.right.style.visibility = "visible";
+                    
+                    ladders.left.style.opacity = "1.0";
+                    ladders.right.style.opacity = "1.0";
+
+                    var timeSec = now / 1000.0;
+                    var driftY = (Math.sin(timeSec * 0.7) * 70) + (Math.cos(timeSec * 0.35) * 50);
+                    
+                    ladders.left.style.transform = "translateX(-30%) translateY(" + driftY.toFixed(1) + "px)";
+                    ladders.right.style.transform = "translateX(30%) translateY(" + driftY.toFixed(1) + "px)";
 
                     var isFullyLocked = normalizedProgress <= 0.05;
                     
@@ -485,9 +539,7 @@ function SyncLoop() {
                     }
 
                   } else {
-                    // Nuke the panel entirely so it physically cannot render
                     if (IsValidPanel(g_compassPanel)) {
-                      $.Msg("[VindictaDebug] Main loop stop. Nuking tracked compass panel.");
                       g_compassPanel.DeleteAsync(0);
                       g_compassPanel = null;
                     }
@@ -499,6 +551,8 @@ function SyncLoop() {
                     chevrons.right.style.opacity = "0.0";
                     if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
                     if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
+                    if (IsValidPanel(g_ladderLeft)) g_ladderLeft.style.opacity = "0.0";
+                    if (IsValidPanel(g_ladderRight)) g_ladderRight.style.opacity = "0.0";
                   }
 
                   g_lastOpacity = nextOpacity;
@@ -518,14 +572,11 @@ function SyncLoop() {
               g_scopeImg.style.imgShadow = null;
             }
             
-            // Actively hunt and destroy if we switched off Vindicta
             var strayCompass = root.FindChildTraverse("VindictaCompassTape");
             if (strayCompass) {
-              $.Msg("[VindictaDebug] Switched Hero: Found and destroyed stray compass.");
               strayCompass.DeleteAsync(0);
             }
             if (IsValidPanel(g_compassPanel)) {
-              $.Msg("[VindictaDebug] Switched Hero: Destroyed tracked compass.");
               g_compassPanel.DeleteAsync(0);
               g_compassPanel = null;
             }
@@ -535,6 +586,8 @@ function SyncLoop() {
               if (IsValidPanel(g_chevronRight)) g_chevronRight.style.opacity = "0.0";
               if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
               if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
+              if (IsValidPanel(g_ladderLeft)) g_ladderLeft.style.opacity = "0.0";
+              if (IsValidPanel(g_ladderRight)) g_ladderRight.style.opacity = "0.0";
               
               g_isMaskHidden = true;
               g_lastOpacity = 0.0;
