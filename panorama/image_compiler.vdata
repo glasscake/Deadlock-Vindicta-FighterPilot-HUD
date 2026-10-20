@@ -10,6 +10,7 @@
         panorama:"file://{images}/hud/crosshair/fire.psd",
         panorama:"file://{images}/hud/crosshair/ladder.psd",
         panorama:"file://{images}/hud/crosshair/0to9.psd",
+        panorama:"file://{images}/hud/crosshair/altbox.psd",
         panorama:"file://{images}/hud/crosshair/compass.psd"
     ]
 }
