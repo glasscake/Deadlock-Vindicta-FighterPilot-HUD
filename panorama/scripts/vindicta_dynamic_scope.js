@@ -39,10 +39,11 @@
   var g_lastStatusFlashTime = 0;
 
   // Compass variables
+  var g_compassViewport = null;
   var g_compassPanel = null;
   var g_minimapMainImage = null;
 
-  //lleft and right ladders
+  // Left and right ladders
   var g_ladderLeft = null;
   var g_ladderRight = null;
 
@@ -147,35 +148,38 @@
 function GetOrCreateCompassPanel(root) {
     if (IsValidPanel(g_compassPanel)) return g_compassPanel;
 
-    var existing = root.FindChildTraverse("VindictaCompassTape");
-    if (existing) {
-      g_compassPanel = existing;
+    // Destroy old dual-panel architecture
+    var oldViewport = root.FindChildTraverse("VindictaCompassViewport");
+    if (oldViewport) oldViewport.DeleteAsync(0);
+
+    var existingTape = root.FindChildTraverse("VindictaCompassTape");
+    if (existingTape) {
+      g_compassPanel = existingTape;
       return g_compassPanel;
     }
 
-    var panel = $.CreatePanel("Image", root, "VindictaCompassTape");
-    panel.SetImage("s2r://panorama/images/hud/crosshair/compass_psd.vtex");
-    
+    // --- PIVOT: The panel IS the crop boundary ---
+    var panel = $.CreatePanel("Panel", root, "VindictaCompassTape");
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "top";
-    panel.style.marginTop = "150px";       
-    
-    panel.style.width = "4872px";         
-    panel.style.height = "45px";          
-    panel.style.minWidth = "4872px";      
-    panel.style.maxWidth = "4872px";
-    
-    panel.style.overflow = "noclip";      
-    panel.style.visibility = "collapse";  
+    panel.style.marginTop = "150px";
+
+    // Lock perfectly to the gap between ladders
+    panel.style.width = "56%";
+    panel.style.height = "45px";
+
+    // Paint texture as a CSS background instead of an image element
+    panel.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/compass_psd.vtex')";
+    panel.style.backgroundSize = "4872px 45px";
+    panel.style.backgroundRepeat = "no-repeat";
+
+    panel.style.visibility = "collapse";
     panel.style.opacity = "0.0";
-    
-    // Native C++ render flag to definitively hide it on creation
     panel.visible = false;
 
     g_compassPanel = panel;
     return g_compassPanel;
   }
-
 
   function GetOrCreateLadderPanels(root) {
     if (IsValidPanel(g_ladderLeft) && IsValidPanel(g_ladderRight)) {
@@ -191,23 +195,23 @@ function GetOrCreateCompassPanel(root) {
       return { left: g_ladderLeft, right: g_ladderRight };
     }
 
-    // Left Ladder: Centered on screen, pushed left by percentage of panel width
+    // Left Ladder
     var leftPanel = $.CreatePanel("Image", root, "VindictaLadderLeft");
     leftPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
     leftPanel.style.horizontalAlign = "center";
     leftPanel.style.verticalAlign = "center";
-    leftPanel.style.transform = "translateX(-30%)"; // Tweak percentage (-400%, -500%, etc.)
+    leftPanel.style.transform = "translateX(-30%)";
     leftPanel.style.width = "76px";
     leftPanel.style.height = "1344px";
     leftPanel.style.opacity = "0.0";
     leftPanel.style.overflow = "noclip";
 
-    // Right Ladder: Centered on screen, pushed right by percentage of panel width
+    // Right Ladder
     var rightPanel = $.CreatePanel("Image", root, "VindictaLadderRight");
     rightPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
     rightPanel.style.horizontalAlign = "center";
     rightPanel.style.verticalAlign = "center";
-    rightPanel.style.transform = "translateX(30%)"; // Tweak percentage (400%, 500%, etc.)
+    rightPanel.style.transform = "translateX(30%)";
     rightPanel.style.width = "76px";
     rightPanel.style.height = "1344px";
     rightPanel.style.opacity = "0.0";
@@ -300,14 +304,11 @@ function GetOrCreateCompassPanel(root) {
     return { left: g_chevronLeft, right: g_chevronRight };
   }
 
-function HideNativeProgress(localProgress, localBacker) {
+  function HideNativeProgress(localProgress, localBacker) {
     var changed = false;
-    
-    // Use 0.001 opacity. This makes it invisible to the human eye, but the 
-    // engine still thinks it's rendering on-screen and will keep updating the value!
     if (localProgress && localProgress.style && localProgress.style.opacity !== "0.001") {
       localProgress.style.opacity = "0.001";
-      localProgress.style.transform = null; // Clear any old off-screen transforms
+      localProgress.style.transform = null;
       changed = true;
     }
     if (localBacker && localBacker.style && localBacker.style.opacity !== "0.001") {
@@ -315,13 +316,11 @@ function HideNativeProgress(localProgress, localBacker) {
       localBacker.style.transform = null;
       changed = true;
     }
-    
     if (changed) g_isNativeHidden = true;
   }
 
   function RestoreNativeProgress(localProgress, localBacker) {
     var changed = false;
-    
     if (localProgress && localProgress.style && localProgress.style.opacity === "0.001") {
       localProgress.style.opacity = "1.0";
       changed = true;
@@ -330,7 +329,6 @@ function HideNativeProgress(localProgress, localBacker) {
       localBacker.style.opacity = "1.0";
       changed = true;
     }
-    
     if (changed) g_isNativeHidden = false;
   }
 
@@ -384,7 +382,7 @@ function HideNativeProgress(localProgress, localBacker) {
     );
   }
 
-function SyncLoop() {
+  function SyncLoop() {
     var nextInterval = IDLE_INTERVAL;
     try {
       if (IsValidPanel(g_progressElement)) {
@@ -396,7 +394,6 @@ function SyncLoop() {
             if (panels.progress) {
               var progressInfo = ReadProgressValue(panels.progress);
               
-              // EARLY SANITY CHECK: Calculate aim state immediately
               var rawVal = progressInfo.value;
               var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
               var isAiming = nextOpacity > 0.0;
@@ -426,7 +423,7 @@ function SyncLoop() {
                 SyncLoop.stuckFrames = 0;
               }
 
-              // Actively hunt down any leftover compass panel by ID and destroy it
+              // Rogue Compass Cleanup
               if (!isAiming) {
                 var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
                 if (rogueCompass) {
@@ -443,8 +440,6 @@ function SyncLoop() {
               if (scopeImg) {
                 var chevrons = GetOrCreateChevronPanels(scopeImg);
                 var statusText = GetOrCreateStatusPanels(scopeImg);
-                
-                // FIXED: Passing 'root' instead of 'scopeImg' so it doesn't get clipped!
                 var ladders = GetOrCreateLadderPanels(root);
                 
                 var isClimbing = nextOpacity >= g_prevRawProgress;
@@ -482,12 +477,21 @@ function SyncLoop() {
 
                     var compassOffsetPx = currentYaw * PX_PER_DEGREE;
 
+                    // --- Dynamically center background inside the 56% panel ---
+                    var panelWidth = compass.actuallayoutwidth;
+                    if (!panelWidth || panelWidth <= 0) panelWidth = 1075; // Frame 1 fallback
+
+                    // Offset = (Panel Half) - (Image Half) - Rotation
+                    var centerBaseX = (panelWidth / 2.0) - (4872.0 / 2.0);
+                    var finalBgX = centerBaseX - compassOffsetPx;
+
                     compass.style.washColor = "#00FF66";
-                    compass.style.imgShadow = g_cachedCrtShadow;
                     compass.visible = true;
                     compass.style.visibility = "visible";
                     compass.style.opacity = "1.0";
-                    compass.style.transform = "translateX(" + (-compassOffsetPx) + "px)";
+                    
+                    // Shift texture internally (100% physically clipped to 56% width)
+                    compass.style.backgroundPosition = finalBgX.toFixed(1) + "px 0px";
 
                     scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
                     scopeImg.style.washColor = "#00FF66";
@@ -615,12 +619,14 @@ function SyncLoop() {
     if (IsValidPanel(g_chevronRight)) g_chevronRight.DeleteAsync(0);
     if (IsValidPanel(g_statusLock)) g_statusLock.DeleteAsync(0);
     if (IsValidPanel(g_statusFire)) g_statusFire.DeleteAsync(0);
+    if (IsValidPanel(g_compassViewport)) g_compassViewport.DeleteAsync(0);
     if (IsValidPanel(g_compassPanel)) g_compassPanel.DeleteAsync(0);
     
     g_chevronLeft = null;
     g_chevronRight = null;
     g_statusLock = null;
     g_statusFire = null;
+    g_compassViewport = null;
     g_compassPanel = null;
     g_hudRoot = null;
     g_meleeAbilityPanel = null;
