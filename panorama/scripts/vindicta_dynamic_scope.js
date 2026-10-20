@@ -36,7 +36,6 @@
   // Lock and fire flashing variables
   var g_statusLock = null;
   var g_statusFire = null;
-  var g_lastStatusFlashTime = 0;
 
   // Compass variables
   var g_compassViewport = null;
@@ -145,13 +144,39 @@
     return 0.0;
   }
 
-// Graphic metrics for 0to9_psd.vtex & altbox_psd.vtex
+  function ReadFlightDurationProgress(root) {
+    try {
+      // Target the exact panel from the log dump
+      var clippedLabel = root.FindChildTraverse("ability_name_clipped");
+      
+      if (IsValidPanel(clippedLabel) && clippedLabel.style && clippedLabel.style.clip) {
+        var clipStr = clippedLabel.style.clip;
+        
+        // Example clip string: rect( 0.0%, 19.403957%, 100.0%, 0.0%)
+        // This regex extracts all numbers followed by a % symbol
+        var matches = clipStr.match(/(\d+(?:\.\d+)?)%/g);
+        
+        if (matches && matches.length >= 2) {
+          // The second percentage is the 'right' clip bound dictating the bar width
+          var widthPercent = parseFloat(matches[1]);
+          if (!isNaN(widthPercent)) {
+            // Convert 0-100% to a 0.0 - 1.0 ratio
+            return widthPercent / 100.0;
+          }
+        }
+      }
+    } catch (e) {}
+    
+    return null;
+  }
+
+  // Graphic metrics for 0to9_psd.vtex & altbox_psd.vtex
   var ODOMETER_CONFIG = {
-    CHAR_HEIGHT: 36.0, // Native height
+    CHAR_HEIGHT: 36.0, 
     SPACING: 8.0,      
-    STRIDE: 44.0,      // Exact stride step (36 + 8)
-    OFFSET_Y: 0.0,     // Vertical alignment fine-tuning
-    WIDTH: 24,         // Native digit width
+    STRIDE: 44.0,      
+    OFFSET_Y: 0.0,     
+    WIDTH: 24,         
     NUM_DIGITS: 4,
     TOTAL_CANVAS_HEIGHT: 432, 
     TEXTURE: "s2r://panorama/images/hud/crosshair/0to9_psd.vtex",
@@ -166,75 +191,71 @@
     strips: [],
 
     GetOrCreate: function (root) {
-    if (IsValidPanel(this.container)) return this.container;
+      if (IsValidPanel(this.container)) return this.container;
 
-    var existing = root.FindChildTraverse("VindictaAltimeterDisplay");
-    if (existing) {
-      this.container = existing;
-      this.boxImage = existing.FindChildTraverse("AltimeterBoxFrame");
-      this.strips = [];
-      for (var i = 0; i < ODOMETER_CONFIG.NUM_DIGITS; i++) {
-        var strip = existing.FindChildTraverse("OdometerStrip_" + i);
-        if (strip) this.strips.push(strip);
+      var existing = root.FindChildTraverse("VindictaAltimeterDisplay");
+      if (existing) {
+        this.container = existing;
+        this.boxImage = existing.FindChildTraverse("AltimeterBoxFrame");
+        this.strips = [];
+        for (var i = 0; i < ODOMETER_CONFIG.NUM_DIGITS; i++) {
+          var strip = existing.FindChildTraverse("OdometerStrip_" + i);
+          if (strip) this.strips.push(strip);
+        }
+        return this.container;
       }
+
+      var container = $.CreatePanel("Panel", root, "VindictaAltimeterDisplay");
+      container.style.horizontalAlign = "center";
+      container.style.verticalAlign = "center";
+      container.style.marginLeft = "40%"; 
+      container.style.width = ODOMETER_CONFIG.BOX_WIDTH + "px";
+      container.style.height = ODOMETER_CONFIG.BOX_HEIGHT + "px";
+      container.style.opacity = "0.0";
+
+      var boxImage = $.CreatePanel("Image", container, "AltimeterBoxFrame");
+      boxImage.SetImage(ODOMETER_CONFIG.BOX_TEXTURE);
+      boxImage.style.width = "100%";
+      boxImage.style.height = "100%";
+      boxImage.style.marginLeft = "-10%";
+
+      var totalDigitsWidth = ODOMETER_CONFIG.WIDTH * ODOMETER_CONFIG.NUM_DIGITS; 
+      
+      var digitGroup = $.CreatePanel("Panel", container, "AltimeterDigitGroup");
+      digitGroup.style.width = totalDigitsWidth + "px"; 
+      digitGroup.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px"; 
+      digitGroup.style.horizontalAlign = "center"; 
+      digitGroup.style.verticalAlign = "center";   
+      digitGroup.style.flowChildren = "right";
+
+      this.strips = [];
+
+      for (var d = 0; d < ODOMETER_CONFIG.NUM_DIGITS; d++) {
+        var slot = $.CreatePanel("Panel", digitGroup, "OdometerSlot_" + d);
+        slot.style.width = ODOMETER_CONFIG.WIDTH + "px";
+        slot.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px";
+        slot.style.overflow = "clip";
+
+        var strip = $.CreatePanel("Panel", slot, "OdometerStrip_" + d);
+        strip.style.width = "100%";
+        strip.style.height = "100%";
+        strip.style.backgroundImage = "url('" + ODOMETER_CONFIG.TEXTURE + "')";
+        strip.style.backgroundSize = ODOMETER_CONFIG.WIDTH + "px " + ODOMETER_CONFIG.TOTAL_CANVAS_HEIGHT + "px";
+        strip.style.backgroundRepeat = "no-repeat";
+
+        this.strips.push(strip);
+      }
+
+      this.boxImage = boxImage;
+      this.container = container;
       return this.container;
-    }
-
-    // Outer Frame Container (125x40)
-    var container = $.CreatePanel("Panel", root, "VindictaAltimeterDisplay");
-    container.style.horizontalAlign = "center";
-    container.style.verticalAlign = "center";
-    container.style.marginLeft = "40%"; 
-    container.style.width = ODOMETER_CONFIG.BOX_WIDTH + "px";
-    container.style.height = ODOMETER_CONFIG.BOX_HEIGHT + "px";
-    container.style.opacity = "0.0";
-
-    // Outer frame box image
-    var boxImage = $.CreatePanel("Image", container, "AltimeterBoxFrame");
-    boxImage.SetImage(ODOMETER_CONFIG.BOX_TEXTURE);
-    boxImage.style.width = "100%";
-    boxImage.style.height = "100%";
-    boxImage.style.marginLeft = "-10%";
-
-    // --- FIX: Force digit group to 96px width and center it horizontally & vertically ---
-    var totalDigitsWidth = ODOMETER_CONFIG.WIDTH * ODOMETER_CONFIG.NUM_DIGITS; // 96px
-    
-    var digitGroup = $.CreatePanel("Panel", container, "AltimeterDigitGroup");
-    digitGroup.style.width = totalDigitsWidth + "px"; // Exactly 96px
-    digitGroup.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px"; // Exactly 36px
-    digitGroup.style.horizontalAlign = "center"; // Centers 96px inside 125px box
-    digitGroup.style.verticalAlign = "center";   // Centers 36px inside 40px box
-    digitGroup.style.flowChildren = "right";
-
-    this.strips = [];
-
-    for (var d = 0; d < ODOMETER_CONFIG.NUM_DIGITS; d++) {
-      var slot = $.CreatePanel("Panel", digitGroup, "OdometerSlot_" + d);
-      slot.style.width = ODOMETER_CONFIG.WIDTH + "px";
-      slot.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px";
-      slot.style.overflow = "clip";
-
-      var strip = $.CreatePanel("Panel", slot, "OdometerStrip_" + d);
-      strip.style.width = "100%";
-      strip.style.height = "100%";
-      strip.style.backgroundImage = "url('" + ODOMETER_CONFIG.TEXTURE + "')";
-      strip.style.backgroundSize = ODOMETER_CONFIG.WIDTH + "px " + ODOMETER_CONFIG.TOTAL_CANVAS_HEIGHT + "px";
-      strip.style.backgroundRepeat = "no-repeat";
-
-      this.strips.push(strip);
-    }
-
-    this.boxImage = boxImage;
-    this.container = container;
-    return this.container;
-  },
+    },
 
     Update: function (value, crtShadow) {
       if (!IsValidPanel(this.container)) return;
 
       var val = Math.max(0, value);
       
-      // Mechanical carry rolling math
       var d3 = val % 10;
       var d2 = (Math.floor(val / 10) % 10) + (d3 >= 9 ? (d3 - 9) : 0);
       var d1 = (Math.floor(val / 100) % 10) + (d2 >= 9.9 ? (d3 - 9) : 0);
@@ -279,10 +300,9 @@
     }
   };
 
-function GetOrCreateCompassPanel(root) {
+  function GetOrCreateCompassPanel(root) {
     if (IsValidPanel(g_compassPanel)) return g_compassPanel;
 
-    // Destroy old dual-panel architecture
     var oldViewport = root.FindChildTraverse("VindictaCompassViewport");
     if (oldViewport) oldViewport.DeleteAsync(0);
 
@@ -292,17 +312,14 @@ function GetOrCreateCompassPanel(root) {
       return g_compassPanel;
     }
 
-    // --- PIVOT: The panel IS the crop boundary ---
     var panel = $.CreatePanel("Panel", root, "VindictaCompassTape");
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "top";
     panel.style.marginTop = "150px";
 
-    // Lock perfectly to the gap between ladders
     panel.style.width = "56%";
     panel.style.height = "45px";
 
-    // Paint texture as a CSS background instead of an image element
     panel.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/compass_psd.vtex')";
     panel.style.backgroundSize = "4872px 45px";
     panel.style.backgroundRepeat = "no-repeat";
@@ -329,7 +346,6 @@ function GetOrCreateCompassPanel(root) {
       return { left: g_ladderLeft, right: g_ladderRight };
     }
 
-    // Left Ladder
     var leftPanel = $.CreatePanel("Image", root, "VindictaLadderLeft");
     leftPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
     leftPanel.style.horizontalAlign = "center";
@@ -340,7 +356,6 @@ function GetOrCreateCompassPanel(root) {
     leftPanel.style.opacity = "0.0";
     leftPanel.style.overflow = "noclip";
 
-    // Right Ladder
     var rightPanel = $.CreatePanel("Image", root, "VindictaLadderRight");
     rightPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
     rightPanel.style.horizontalAlign = "center";
@@ -532,7 +547,6 @@ function GetOrCreateCompassPanel(root) {
               var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
               var isAiming = nextOpacity > 0.0;
 
-              // ENGINE FAILSAFE 1: Deep visibility checks
               try {
                 if (g_progressElement && (g_progressElement.style.visibility === "collapse" || g_progressElement.BHasClass("Hidden") || g_progressElement.actualvisibility === "collapse" || g_progressElement.visible === false)) {
                   isAiming = false;
@@ -543,7 +557,6 @@ function GetOrCreateCompassPanel(root) {
                 }
               } catch (e) {}
 
-              // ENGINE FAILSAFE 2: Freeze Detection (6 frames)
               if (isAiming && nextOpacity > 0.0 && nextOpacity < 1.0) {
                 if (nextOpacity === g_prevRawProgress) {
                   SyncLoop.stuckFrames = (SyncLoop.stuckFrames || 0) + 1;
@@ -557,7 +570,6 @@ function GetOrCreateCompassPanel(root) {
                 SyncLoop.stuckFrames = 0;
               }
 
-              // Rogue Compass Cleanup
               if (!isAiming) {
                 var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
                 if (rogueCompass) {
@@ -611,7 +623,6 @@ function GetOrCreateCompassPanel(root) {
 
                     var compassOffsetPx = currentYaw * PX_PER_DEGREE;
 
-                    // Dynamically center background inside the 56% panel
                     var panelWidth = compass.actuallayoutwidth;
                     if (!panelWidth || panelWidth <= 0) panelWidth = 1075;
 
@@ -638,7 +649,6 @@ function GetOrCreateCompassPanel(root) {
                     chevrons.left.style.transform = "translateX(" + (-currentOffset) + "px)";
                     chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
 
-                    // Ladders Drift Logic
                     ladders.left.style.washColor = "#00FF66";
                     ladders.right.style.washColor = "#00FF66";
                     ladders.left.style.imgShadow = g_cachedCrtShadow;
@@ -674,12 +684,29 @@ function GetOrCreateCompassPanel(root) {
                       statusText.lock.style.opacity = "0.0";
                     }
 
-                    // --- ODOMETER ALTIMETER READOUT ---
+                    // --- DYNAMIC FLIGHT DURATION READOUT (9999 -> 0000) ---
                     g_altimeterDisplay.GetOrCreate(root);
-                    var fauxAltitude = 1200 + Math.floor(normalizedProgress * 1200);
-                    g_altimeterDisplay.Update(fauxAltitude, g_cachedCrtShadow);
 
-                    
+                    var cancelPrompt = root.FindChildTraverse("citadel_ability_hornet_leap_cancel_single_ability");
+                    var isFlying = IsValidPanel(cancelPrompt);
+
+                    var flightValue = 0;
+
+                    if (isFlying) {
+                      var progressRatio = ReadFlightDurationProgress(root);
+                      
+                      if (progressRatio !== null) {
+                        // Invert the ratio (1.0 - progressRatio) so it counts DOWN instead of UP
+                        var remainingRatio = 1.0 - progressRatio;
+                        flightValue = Math.floor(Math.max(0.0, Math.min(1.0, remainingRatio)) * 9999);
+                      } else {
+                        flightValue = 9999;
+                      }
+                    } else {
+                      flightValue = 0;
+                    }
+
+                    g_altimeterDisplay.Update(flightValue, g_cachedCrtShadow);
 
                   } else {
                     if (IsValidPanel(g_compassPanel)) {
@@ -687,7 +714,6 @@ function GetOrCreateCompassPanel(root) {
                       g_compassPanel = null;
                     }
 
-                    // Hide altimeter display when scoping out
                     g_altimeterDisplay.Hide();
                     
                     scopeImg.style.backgroundImage = null;
@@ -718,7 +744,6 @@ function GetOrCreateCompassPanel(root) {
               g_scopeImg.style.imgShadow = null;
             }
             
-            // Destroy altimeter display on hero swap
             g_altimeterDisplay.Destroy();
 
             var strayCompass = root.FindChildTraverse("VindictaCompassTape");
@@ -760,6 +785,9 @@ function GetOrCreateCompassPanel(root) {
       $.CancelScheduled(g_schedulerId);
       g_schedulerId = null;
     }
+
+    g_altimeterDisplay.Destroy();
+
     if (IsValidPanel(g_chevronLeft)) g_chevronLeft.DeleteAsync(0);
     if (IsValidPanel(g_chevronRight)) g_chevronRight.DeleteAsync(0);
     if (IsValidPanel(g_statusLock)) g_statusLock.DeleteAsync(0);
