@@ -145,6 +145,113 @@
     return 0.0;
   }
 
+// Graphic metrics for 0to9_psd.vtex
+  var ODOMETER_CONFIG = {
+    CHAR_HEIGHT: 36.0, 
+    SPACING: 8.0,      
+    STRIDE: 44.0,      // Exact step distance (36 + 8)
+    OFFSET_Y: 0.0,     // Fine-tune vertical nudge if needed
+    WIDTH: 24,         
+    NUM_DIGITS: 4,
+    TOTAL_CANVAS_HEIGHT: 432, // 10 digits * 36px + 9 gaps * 8px
+    TEXTURE: "s2r://panorama/images/hud/crosshair/0to9_psd.vtex"
+  };
+
+  var g_altimeterDisplay = {
+    container: null,
+    strips: [],
+
+    GetOrCreate: function (root) {
+      if (IsValidPanel(this.container)) return this.container;
+
+      var existing = root.FindChildTraverse("VindictaAltimeterDisplay");
+      if (existing) {
+        this.container = existing;
+        this.strips = [];
+        for (var i = 0; i < ODOMETER_CONFIG.NUM_DIGITS; i++) {
+          var strip = existing.FindChildTraverse("OdometerStrip_" + i);
+          if (strip) this.strips.push(strip);
+        }
+        return this.container;
+      }
+
+      var container = $.CreatePanel("Panel", root, "VindictaAltimeterDisplay");
+      container.style.horizontalAlign = "center";
+      container.style.verticalAlign = "center";
+      container.style.marginLeft = "38%"; 
+      container.style.flowChildren = "right";
+      container.style.opacity = "0.0";
+
+      this.strips = [];
+
+      for (var d = 0; d < ODOMETER_CONFIG.NUM_DIGITS; d++) {
+        var slot = $.CreatePanel("Panel", container, "OdometerSlot_" + d);
+        slot.style.width = ODOMETER_CONFIG.WIDTH + "px";
+        slot.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px";
+        
+        // Strict clipping prevents adjacent digits and scroll artifacts from bleeding out
+        slot.style.overflow = "clip";
+
+        var strip = $.CreatePanel("Panel", slot, "OdometerStrip_" + d);
+        strip.style.width = "100%";
+        strip.style.height = "100%";
+        strip.style.backgroundImage = "url('" + ODOMETER_CONFIG.TEXTURE + "')";
+        
+        // Force native un-squashed height (432px)
+        strip.style.backgroundSize = ODOMETER_CONFIG.WIDTH + "px " + ODOMETER_CONFIG.TOTAL_CANVAS_HEIGHT + "px";
+        strip.style.backgroundRepeat = "no-repeat";
+
+        this.strips.push(strip);
+      }
+
+      this.container = container;
+      return this.container;
+    },
+
+    Update: function (value, crtShadow) {
+      if (!IsValidPanel(this.container)) return;
+
+      var val = Math.max(0, value);
+      
+      // Tens, hundreds, and thousands only roll during the last 1.0 unit of the lower digit's cycle
+      var d3 = val % 10;
+      var d2 = (Math.floor(val / 10) % 10) + (d3 >= 9 ? (d3 - 9) : 0);
+      var d1 = (Math.floor(val / 100) % 10) + (d2 >= 9.9 ? (d3 - 9) : 0);
+      var d0 = (Math.floor(val / 1000) % 10) + (d1 >= 9.9 ? (d3 - 9) : 0);
+
+      var digitValues = [d0, d1, d2, d3];
+
+      for (var i = 0; i < ODOMETER_CONFIG.NUM_DIGITS; i++) {
+        var digitVal = digitValues[i];
+        var strip = this.strips[i];
+
+        if (IsValidPanel(strip)) {
+          var offsetY = -(digitVal * ODOMETER_CONFIG.STRIDE) + ODOMETER_CONFIG.OFFSET_Y;
+          
+          strip.style.backgroundPosition = "0px " + offsetY.toFixed(2) + "px";
+          strip.style.washColor = "#00FF66";
+          strip.style.imgShadow = crtShadow;
+        }
+      }
+
+      this.container.style.opacity = "1.0";
+    },
+
+    Hide: function () {
+      if (IsValidPanel(this.container)) {
+        this.container.style.opacity = "0.0";
+      }
+    },
+
+    Destroy: function () {
+      if (IsValidPanel(this.container)) {
+        this.container.DeleteAsync(0);
+      }
+      this.container = null;
+      this.strips = [];
+    }
+  };
+
 function GetOrCreateCompassPanel(root) {
     if (IsValidPanel(g_compassPanel)) return g_compassPanel;
 
@@ -477,11 +584,10 @@ function GetOrCreateCompassPanel(root) {
 
                     var compassOffsetPx = currentYaw * PX_PER_DEGREE;
 
-                    // --- Dynamically center background inside the 56% panel ---
+                    // Dynamically center background inside the 56% panel
                     var panelWidth = compass.actuallayoutwidth;
-                    if (!panelWidth || panelWidth <= 0) panelWidth = 1075; // Frame 1 fallback
+                    if (!panelWidth || panelWidth <= 0) panelWidth = 1075;
 
-                    // Offset = (Panel Half) - (Image Half) - Rotation
                     var centerBaseX = (panelWidth / 2.0) - (4872.0 / 2.0);
                     var finalBgX = centerBaseX - compassOffsetPx;
 
@@ -490,7 +596,6 @@ function GetOrCreateCompassPanel(root) {
                     compass.style.visibility = "visible";
                     compass.style.opacity = "1.0";
                     
-                    // Shift texture internally (100% physically clipped to 56% width)
                     compass.style.backgroundPosition = finalBgX.toFixed(1) + "px 0px";
 
                     scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
@@ -542,11 +647,19 @@ function GetOrCreateCompassPanel(root) {
                       statusText.lock.style.opacity = "0.0";
                     }
 
+                    // --- ODOMETER ALTIMETER READOUT ---
+                    g_altimeterDisplay.GetOrCreate(root);
+                    var fauxAltitude = 1200 + Math.floor(normalizedProgress * 1200);
+                    g_altimeterDisplay.Update(fauxAltitude, g_cachedCrtShadow);
+
                   } else {
                     if (IsValidPanel(g_compassPanel)) {
                       g_compassPanel.DeleteAsync(0);
                       g_compassPanel = null;
                     }
+
+                    // Hide altimeter display when scoping out
+                    g_altimeterDisplay.Hide();
                     
                     scopeImg.style.backgroundImage = null;
                     scopeImg.style.washColor = null;
@@ -576,6 +689,9 @@ function GetOrCreateCompassPanel(root) {
               g_scopeImg.style.imgShadow = null;
             }
             
+            // Destroy altimeter display on hero swap
+            g_altimeterDisplay.Destroy();
+
             var strayCompass = root.FindChildTraverse("VindictaCompassTape");
             if (strayCompass) {
               strayCompass.DeleteAsync(0);
