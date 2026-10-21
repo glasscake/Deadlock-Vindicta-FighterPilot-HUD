@@ -193,6 +193,8 @@
     altImage: null,
     pullUpImage: null,
     strips: [],
+    warningMode: null,
+    warningStartTime: 0,
 
     GetOrCreate: function (root) {
       function CreateWarningImage(parent, id, texture) {
@@ -324,17 +326,26 @@
 
       if (IsValidPanel(this.altImage) && IsValidPanel(this.pullUpImage)) {
         var now = Date.now();
+        var warningMode = val > 3500 && val <= 7500 ? "altitude" :
+                          val > 0 && val <= 3500 ? "pullup" : null;
+
+        if (warningMode !== this.warningMode) {
+          this.warningMode = warningMode;
+          this.warningStartTime = now;
+        }
+
         this.altImage.style.washColor = "#00FF66";
         this.altImage.style.imgShadow = crtShadow;
         this.pullUpImage.style.washColor = "#00FF66";
         this.pullUpImage.style.imgShadow = crtShadow;
 
-        if (val > 3500 && val <= 7500) {
-          this.altImage.style.opacity = (now % 800) < 400 ? "1.0" : "0.0";
+        var warningElapsed = now - this.warningStartTime;
+        if (warningMode === "altitude") {
+          this.altImage.style.opacity = (warningElapsed % 800) < 400 ? "1.0" : "0.0";
           this.pullUpImage.style.opacity = "0.0";
-        } else if (val > 0 && val <= 3500) {
+        } else if (warningMode === "pullup") {
           this.altImage.style.opacity = "0.0";
-          this.pullUpImage.style.opacity = (now % 500) < 250 ? "1.0" : "0.0";
+          this.pullUpImage.style.opacity = (warningElapsed % 500) < 250 ? "1.0" : "0.0";
         } else {
           this.altImage.style.opacity = "0.0";
           this.pullUpImage.style.opacity = "0.0";
@@ -350,6 +361,8 @@
       }
       if (IsValidPanel(this.altImage)) this.altImage.style.opacity = "0.0";
       if (IsValidPanel(this.pullUpImage)) this.pullUpImage.style.opacity = "0.0";
+      this.warningMode = null;
+      this.warningStartTime = 0;
     },
 
     Destroy: function () {
@@ -361,6 +374,8 @@
       this.altImage = null;
       this.pullUpImage = null;
       this.strips = [];
+      this.warningMode = null;
+      this.warningStartTime = 0;
     }
   };
 
