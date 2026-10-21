@@ -181,6 +181,8 @@
     TOTAL_CANVAS_HEIGHT: 432, 
     TEXTURE: "s2r://panorama/images/hud/crosshair/0to9_psd.vtex",
     BOX_TEXTURE: "s2r://panorama/images/hud/crosshair/altbox_psd.vtex",
+    ALT_TEXTURE: "s2r://panorama/images/hud/crosshair/alt_psd.vtex",
+    PULLUP_TEXTURE: "s2r://panorama/images/hud/crosshair/pullup_psd.vtex",
     BOX_WIDTH: 140,
     BOX_HEIGHT: 50
   };
@@ -188,15 +190,48 @@
   var g_altimeterDisplay = {
     container: null,
     boxImage: null,
+    altImage: null,
+    pullUpImage: null,
     strips: [],
 
     GetOrCreate: function (root) {
+      function CreateWarningImage(parent, id, texture) {
+        var image = $.CreatePanel("Image", parent, id);
+        image.SetImage(texture);
+        image.style.horizontalAlign = "center";
+        image.style.verticalAlign = "top";
+        image.style.marginTop = ODOMETER_CONFIG.BOX_HEIGHT + "px";
+        image.style.width = "125px";
+        image.style.height = "40px";
+        image.style.opacity = "0.0";
+        return image;
+      }
+
       if (IsValidPanel(this.container)) return this.container;
 
       var existing = root.FindChildTraverse("VindictaAltimeterDisplay");
       if (existing) {
         this.container = existing;
         this.boxImage = existing.FindChildTraverse("AltimeterBoxFrame");
+        this.altImage = existing.FindChildTraverse("AltimeterAltWarning");
+        this.pullUpImage = existing.FindChildTraverse("AltimeterPullUpWarning");
+        if (!IsValidPanel(this.altImage)) {
+          this.altImage = CreateWarningImage(existing, "AltimeterAltWarning", ODOMETER_CONFIG.ALT_TEXTURE);
+        }
+        if (!IsValidPanel(this.pullUpImage)) {
+          this.pullUpImage = CreateWarningImage(existing, "AltimeterPullUpWarning", ODOMETER_CONFIG.PULLUP_TEXTURE);
+        }
+        existing.style.height = "90px";
+        existing.style.transform = "translateY(20px)";
+        if (IsValidPanel(this.boxImage)) {
+          this.boxImage.style.height = ODOMETER_CONFIG.BOX_HEIGHT + "px";
+          this.boxImage.style.verticalAlign = "top";
+        }
+        var existingDigitGroup = existing.FindChildTraverse("AltimeterDigitGroup");
+        if (IsValidPanel(existingDigitGroup)) {
+          existingDigitGroup.style.verticalAlign = "top";
+          existingDigitGroup.style.marginTop = "7px";
+        }
         this.strips = [];
         for (var i = 0; i < ODOMETER_CONFIG.NUM_DIGITS; i++) {
           var strip = existing.FindChildTraverse("OdometerStrip_" + i);
@@ -210,13 +245,16 @@
       container.style.verticalAlign = "center";
       container.style.marginLeft = "40%"; 
       container.style.width = ODOMETER_CONFIG.BOX_WIDTH + "px";
-      container.style.height = ODOMETER_CONFIG.BOX_HEIGHT + "px";
+      container.style.height = "90px";
+      container.style.transform = "translateY(20px)";
       container.style.opacity = "0.0";
+      container.style.overflow = "noclip";
 
       var boxImage = $.CreatePanel("Image", container, "AltimeterBoxFrame");
       boxImage.SetImage(ODOMETER_CONFIG.BOX_TEXTURE);
       boxImage.style.width = "100%";
-      boxImage.style.height = "100%";
+      boxImage.style.height = ODOMETER_CONFIG.BOX_HEIGHT + "px";
+      boxImage.style.verticalAlign = "top";
       boxImage.style.marginLeft = "-10%";
 
       var totalDigitsWidth = ODOMETER_CONFIG.WIDTH * ODOMETER_CONFIG.NUM_DIGITS; 
@@ -225,7 +263,8 @@
       digitGroup.style.width = totalDigitsWidth + "px"; 
       digitGroup.style.height = ODOMETER_CONFIG.CHAR_HEIGHT + "px"; 
       digitGroup.style.horizontalAlign = "center"; 
-      digitGroup.style.verticalAlign = "center";   
+      digitGroup.style.verticalAlign = "top";
+      digitGroup.style.marginTop = "7px";
       digitGroup.style.flowChildren = "right";
 
       this.strips = [];
@@ -246,6 +285,8 @@
         this.strips.push(strip);
       }
 
+      this.altImage = CreateWarningImage(container, "AltimeterAltWarning", ODOMETER_CONFIG.ALT_TEXTURE);
+      this.pullUpImage = CreateWarningImage(container, "AltimeterPullUpWarning", ODOMETER_CONFIG.PULLUP_TEXTURE);
       this.boxImage = boxImage;
       this.container = container;
       return this.container;
@@ -281,6 +322,25 @@
         this.boxImage.style.imgShadow = crtShadow;
       }
 
+      if (IsValidPanel(this.altImage) && IsValidPanel(this.pullUpImage)) {
+        var now = Date.now();
+        this.altImage.style.washColor = "#00FF66";
+        this.altImage.style.imgShadow = crtShadow;
+        this.pullUpImage.style.washColor = "#00FF66";
+        this.pullUpImage.style.imgShadow = crtShadow;
+
+        if (val > 3500 && val <= 7500) {
+          this.altImage.style.opacity = (now % 800) < 400 ? "1.0" : "0.0";
+          this.pullUpImage.style.opacity = "0.0";
+        } else if (val > 0 && val <= 3500) {
+          this.altImage.style.opacity = "0.0";
+          this.pullUpImage.style.opacity = (now % 500) < 250 ? "1.0" : "0.0";
+        } else {
+          this.altImage.style.opacity = "0.0";
+          this.pullUpImage.style.opacity = "0.0";
+        }
+      }
+
       this.container.style.opacity = "1.0";
     },
 
@@ -288,6 +348,8 @@
       if (IsValidPanel(this.container)) {
         this.container.style.opacity = "0.0";
       }
+      if (IsValidPanel(this.altImage)) this.altImage.style.opacity = "0.0";
+      if (IsValidPanel(this.pullUpImage)) this.pullUpImage.style.opacity = "0.0";
     },
 
     Destroy: function () {
@@ -296,6 +358,8 @@
       }
       this.container = null;
       this.boxImage = null;
+      this.altImage = null;
+      this.pullUpImage = null;
       this.strips = [];
     }
   };
@@ -688,7 +752,13 @@
                     g_altimeterDisplay.GetOrCreate(root);
 
                     var cancelPrompt = root.FindChildTraverse("citadel_ability_hornet_leap_cancel_single_ability");
-                    var isFlying = IsValidPanel(cancelPrompt);
+                    var isFlying = false;
+                    if (IsValidPanel(cancelPrompt)) {
+                      var isHidden = cancelPrompt.BHasClass("Hidden") ||
+                                     cancelPrompt.style.visibility === "collapse" ||
+                                     cancelPrompt.visible === false;
+                      isFlying = !isHidden;
+                    }
 
                     var flightValue = 0;
 
