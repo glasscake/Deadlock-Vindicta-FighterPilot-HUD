@@ -50,11 +50,14 @@
   var SNIPE_CHARGE_ICON_WIDTH = 42;
   var SNIPE_CHARGE_ICON_HEIGHT = 32;
   var SNIPE_CHARGE_ICON_GAP = 5;
-  var SNIPE_SPENT_OPACITY = "0.28";
+  var SNIPE_AVAILABLE_TEXTURE = "s2r://panorama/images/hud/crosshair/arm_psd.vtex";
+  var SNIPE_SPENT_TEXTURE = "s2r://panorama/images/hud/crosshair/armspent_psd.vtex";
   var g_snipeChargePanel = null;
   var g_snipeChargeIcons = [];
+  var g_snipeChargeTextures = [];
   var g_snipeMaxObserved = SNIPE_BASE_MAX_CHARGES;
   var g_snipeCurrentObserved = SNIPE_BASE_MAX_CHARGES;
+  var g_snipeHasObservedCurrent = false;
   var g_lastSnipeChargeStatus = null;
   var g_snipeAbilityPanel = null;
   var g_snipeAbilityNameDiagnostic = "unknown";
@@ -312,6 +315,49 @@
     return null;
   }
 
+  function ReadCurrentSnipeChargesFromStack(panel, maximumCharges) {
+    if (!IsValidPanel(panel)) return null;
+    var rightSegment = panel.FindChildTraverse("stack_charges_Right");
+    if (!IsValidPanel(rightSegment)) return null;
+
+    function ToFiniteNumber(value) {
+      if (value === null || value === undefined || value === "") return NaN;
+      var number = Number(value);
+      return isNaN(number) ? NaN : number;
+    }
+
+    var depletedWidth = ToFiniteNumber(rightSegment.actuallayoutwidth);
+    if (isNaN(depletedWidth) || depletedWidth < 0) {
+      depletedWidth = parseFloat(rightSegment.style.width);
+    }
+    if (isNaN(depletedWidth) || depletedWidth < 0) return null;
+
+    var position = NaN;
+    try { position = parseFloat(rightSegment.style.position); } catch (e) {}
+    if (isNaN(position)) {
+      try { position = ToFiniteNumber(rightSegment.actuallayoutxoffset); } catch (e) {}
+    }
+    if (isNaN(position)) {
+      try { position = ToFiniteNumber(rightSegment.actualxoffset); } catch (e) {}
+    }
+
+    var span = !isNaN(position) && position >= 0 ? position + depletedWidth : 0;
+    if (span <= 0) {
+      var bar = rightSegment.GetParent ? rightSegment.GetParent() : null;
+      if (IsValidPanel(bar)) span = ToFiniteNumber(bar.actuallayoutwidth);
+    }
+    if (isNaN(span) || span <= 0) span = 89;
+
+    var depletedRatio = Math.max(0, Math.min(1, depletedWidth / span));
+    var available = Math.round((1 - depletedRatio) * maximumCharges);
+    return {
+      value: Math.max(0, Math.min(maximumCharges, available)),
+      source: "stack_charges_Right width=" + depletedWidth.toFixed(1) +
+              " position=" + (isNaN(position) ? "unknown" : position.toFixed(1)) +
+              " span=" + span.toFixed(1)
+    };
+  }
+
   function ReadSnipeChargesFromGameApi() {
     try {
       if (typeof Abilities === "undefined" || !Abilities.GetLocalPlayerAbility) return null;
@@ -350,10 +396,12 @@
     if (IsValidPanel(existing)) {
       g_snipeChargePanel = existing;
       g_snipeChargeIcons = [];
+      g_snipeChargeTextures = [];
       for (var i = 0; ; i++) {
         var icon = existing.FindChildTraverse("VindictaSnipeCharge_" + i);
         if (!IsValidPanel(icon)) break;
         g_snipeChargeIcons.push(icon);
+        g_snipeChargeTextures.push(null);
       }
       return g_snipeChargePanel;
     }
@@ -362,7 +410,7 @@
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "center";
     panel.style.marginLeft = "-30%";
-    panel.style.marginTop = "-10%";
+    panel.style.marginTop = "0%";
     panel.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
     panel.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
     panel.style.flowChildren = "down";
@@ -375,6 +423,7 @@
 
     g_snipeChargePanel = panel;
     g_snipeChargeIcons = [];
+    g_snipeChargeTextures = [];
     return g_snipeChargePanel;
   }
 
@@ -382,20 +431,31 @@
     var panel = GetOrCreateSnipeChargePanel(root);
     var abilityPanel = FindSnipeAbilityPanel(root);
     var chargesLabel = IsValidPanel(abilityPanel) ? abilityPanel.FindChildTraverse("charges") : null;
-    var currentCharges = g_snipeCurrentObserved;
     var reportedMaximum = IsValidPanel(abilityPanel) ? ReadMaximumSnipeCharges(abilityPanel) : null;
-    var maximumCharges = reportedMaximum !== null ? Math.max(reportedMaximum, currentCharges) :
-                         Math.max(g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
+    var maximumCharges = reportedMaximum !== null ? Math.max(reportedMaximum, g_snipeHasObservedCurrent ? g_snipeCurrentObserved : 0) :
+               Math.max(g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, g_snipeHasObservedCurrent ? g_snipeCurrentObserved : 0);
+    var currentCharges = g_snipeHasObservedCurrent ? g_snipeCurrentObserved : maximumCharges;
+    var currentChargeSource = g_snipeHasObservedCurrent ? "last-known" : "assume-full-until-count-readable";
     var chargeSource = "fallback";
     if (reportedMaximum !== null) {
       g_snipeMaxObserved = maximumCharges;
       chargeSource = "stack-divider:max=" + reportedMaximum;
     }
-    var apiCharges = ReadSnipeChargesFromGameApi();
+    var stackChargeReading = ReadCurrentSnipeChargesFromStack(abilityPanel, maximumCharges);
+    var apiCharges = stackChargeReading ? null : ReadSnipeChargesFromGameApi();
 
-    if (apiCharges) {
+    if (stackChargeReading) {
+      currentCharges = stackChargeReading.value;
+      g_snipeCurrentObserved = currentCharges;
+      g_snipeHasObservedCurrent = true;
+      currentChargeSource = stackChargeReading.source;
+      g_snipeMaxObserved = maximumCharges;
+      chargeSource = "stack-divider:max=" + maximumCharges;
+    } else if (apiCharges) {
       currentCharges = apiCharges.current;
       g_snipeCurrentObserved = currentCharges;
+      g_snipeHasObservedCurrent = true;
+      currentChargeSource = apiCharges.source;
       maximumCharges = apiCharges.maximum !== null ? Math.max(apiCharges.maximum, currentCharges) :
                        Math.max(maximumCharges, g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
       g_snipeMaxObserved = maximumCharges;
@@ -405,6 +465,8 @@
       if (chargeReading) {
         currentCharges = chargeReading.value;
         g_snipeCurrentObserved = currentCharges;
+        g_snipeHasObservedCurrent = true;
+        currentChargeSource = chargeReading.source;
 
         maximumCharges = Math.max(maximumCharges, g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
         g_snipeMaxObserved = maximumCharges;
@@ -426,9 +488,11 @@
       var iconIndex = g_snipeChargeIcons.length;
       var icon = $.CreatePanel("Panel", panel, "VindictaSnipeCharge_" + iconIndex);
       g_snipeChargeIcons.push(icon);
+      g_snipeChargeTextures.push(null);
     }
     while (g_snipeChargeIcons.length > maximumCharges) {
       var removedIcon = g_snipeChargeIcons.pop();
+      g_snipeChargeTextures.pop();
       if (IsValidPanel(removedIcon)) removedIcon.DeleteAsync(0);
     }
 
@@ -450,12 +514,16 @@
       chargeIcon.style.marginBottom = SNIPE_CHARGE_ICON_GAP + "px";
       chargeIcon.style.backgroundImage = null;
       chargeIcon.style.visibility = "visible";
-      chargeIcon.style.opacity = isAiming ? (i < currentCharges ? "1.0" : SNIPE_SPENT_OPACITY) : "0.0";
+      chargeIcon.style.opacity = isAiming ? "1.0" : "0.0";
 
       var chargeImage = chargeIcon.FindChildTraverse("VindictaSnipeChargeImage_" + i);
       if (!IsValidPanel(chargeImage)) {
         chargeImage = $.CreatePanel("Image", chargeIcon, "VindictaSnipeChargeImage_" + i);
-        chargeImage.SetImage("s2r://panorama/images/hud/crosshair/arm_psd.vtex");
+      }
+      var texture = i < currentCharges ? SNIPE_AVAILABLE_TEXTURE : SNIPE_SPENT_TEXTURE;
+      if (g_snipeChargeTextures[i] !== texture) {
+        chargeImage.SetImage(texture);
+        g_snipeChargeTextures[i] = texture;
       }
       chargeImage.style.width = "100%";
       chargeImage.style.height = "100%";
@@ -469,6 +537,7 @@
       } catch (e) {}
     }
     LogSnipeChargeStatus("source=" + chargeSource + " current=" + currentCharges + " max=" + maximumCharges +
+                         " currentSource=" + currentChargeSource +
                " panel=" + (IsValidPanel(abilityPanel) ? abilityPanel.id : "missing") +
                " scope=" + (isAiming ? "active" : "inactive"));
   }
