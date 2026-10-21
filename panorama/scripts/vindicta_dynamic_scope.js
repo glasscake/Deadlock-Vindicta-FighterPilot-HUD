@@ -6,7 +6,7 @@
   var HERO_RECHECK_INTERVAL = 2.0;
   var DEBUG_LOG_INTERVAL = 1.0;
   var VINDICTA_HERO_NAME = "hornet";
-  var DEBUG = false;
+  var DEBUG = true;
 
   var g_schedulerId = null;
   var g_hudRoot = null;
@@ -54,7 +54,12 @@
   var g_snipeChargePanel = null;
   var g_snipeChargeIcons = [];
   var g_snipeMaxObserved = SNIPE_BASE_MAX_CHARGES;
+  var g_snipeCurrentObserved = SNIPE_BASE_MAX_CHARGES;
   var g_lastSnipeChargeStatus = null;
+  var g_snipeAbilityPanel = null;
+  var g_snipeAbilityNameDiagnostic = "unknown";
+  var g_lastSnipeAbilitySearchTime = 0;
+  var g_snipeChargeSearchDiagnostic = "";
 
   function IsValidPanel(p) {
     try {
@@ -112,6 +117,19 @@
   function ReadMaximumSnipeCharges(panel) {
     var names = ["max_charges", "maxCharges", "charges_max", "max_charge_count", "AbilityCharges", "ability_charges"];
     var maximum = null;
+
+    var dividerContainer = panel.FindChildTraverse("stack_divider_container");
+    if (IsValidPanel(dividerContainer)) {
+      var dividerCount = 0;
+      var dividerChildren = dividerContainer.Children ? dividerContainer.Children() : [];
+      for (var d = 0; d < dividerChildren.length; d++) {
+        try {
+          if (dividerChildren[d].BHasClass && dividerChildren[d].BHasClass("stack_divider")) dividerCount++;
+        } catch (e) {}
+      }
+      if (dividerCount > 0) maximum = dividerCount + 1;
+    }
+
     var pending = [{ panel: panel, depth: 0 }];
 
     while (pending.length > 0) {
@@ -134,18 +152,130 @@
     return maximum;
   }
 
+  function FindPanelByClass(root, className) {
+    var pending = [root];
+    while (pending.length > 0) {
+      var current = pending.pop();
+      if (!IsValidPanel(current)) continue;
+      try {
+        if (current.BHasClass && current.BHasClass(className)) return current;
+      } catch (e) {}
+      var children = current.Children ? current.Children() : [];
+      for (var i = 0; i < children.length; i++) pending.push(children[i]);
+    }
+    return null;
+  }
+
   function FindSnipeAbilityPanel(root) {
+    var signatureSlot = root.FindChildTraverse("slot_signature_4");
+    if (IsValidPanel(signatureSlot) &&
+        (IsValidPanel(signatureSlot.FindChildTraverse("stack_divider_container")) ||
+         IsValidPanel(signatureSlot.FindChildTraverse("charges")))) {
+      g_snipeAbilityPanel = signatureSlot;
+      g_snipeAbilityNameDiagnostic = "slot_signature_4";
+      g_snipeChargeSearchDiagnostic = "matched=slot_signature_4";
+      return signatureSlot;
+    }
+
+    var activeAbilities = root.FindChildTraverse("ActiveAbilitiesMenu");
+    if (IsValidPanel(activeAbilities)) {
+      var fallbackButton = null;
+      for (var buttonIndex = 0; buttonIndex < 4; buttonIndex++) {
+        var button = activeAbilities.FindChildTraverse("abilityButton" + buttonIndex);
+        if (!IsValidPanel(button)) continue;
+        var nameLabel = FindPanelByClass(button, "ability_name");
+        var abilityName = IsValidPanel(nameLabel) ? String(nameLabel.text || "") : "";
+        if (buttonIndex === 3) fallbackButton = button;
+        if (/snipe|assassinate/i.test(abilityName) && IsValidPanel(button.FindChildTraverse("charges"))) {
+          g_snipeAbilityPanel = button;
+          g_snipeAbilityNameDiagnostic = abilityName || "matched by slot";
+          g_snipeChargeSearchDiagnostic = "matched=" + (button.id || "abilityButton" + buttonIndex) + " name=" + abilityName;
+          return button;
+        }
+      }
+      if (IsValidPanel(fallbackButton) && IsValidPanel(fallbackButton.FindChildTraverse("charges"))) {
+        var fallbackNameLabel = FindPanelByClass(fallbackButton, "ability_name");
+        g_snipeAbilityPanel = fallbackButton;
+        g_snipeAbilityNameDiagnostic = IsValidPanel(fallbackNameLabel) ? String(fallbackNameLabel.text || "") : "name-unavailable";
+        g_snipeChargeSearchDiagnostic = "fallback=" + (fallbackButton.id || "abilityButton3") + " name=" + g_snipeAbilityNameDiagnostic;
+        return fallbackButton;
+      }
+    }
+
     var ids = [
       "slot_signature_4",
       "citadel_ability_hornet_snipe",
       "citadel_weapon_hornet_assassinate",
       "ability_hornet_snipe"
     ];
+    var now = Date.now();
 
-    for (var i = 0; i < ids.length; i++) {
-      var panel = root.FindChildTraverse(ids[i]);
-      if (IsValidPanel(panel) && IsValidPanel(panel.FindChildTraverse("charges"))) return panel;
+    if (IsValidPanel(g_snipeAbilityPanel) && IsValidPanel(g_snipeAbilityPanel.FindChildTraverse("charges"))) {
+      return g_snipeAbilityPanel;
     }
+    g_snipeAbilityPanel = null;
+    if ((now - g_lastSnipeAbilitySearchTime) < 1000) return null;
+    g_lastSnipeAbilitySearchTime = now;
+
+    var treeRoot = root;
+    var parentDepth = 32;
+    while (treeRoot && treeRoot.GetParent && parentDepth > 0) {
+      var parent = treeRoot.GetParent();
+      if (!IsValidPanel(parent)) break;
+      treeRoot = parent;
+      parentDepth--;
+    }
+    var searchRoots = [root];
+    if (treeRoot !== root) searchRoots.push(treeRoot);
+
+    for (var r = 0; r < searchRoots.length; r++) {
+      for (var i = 0; i < ids.length; i++) {
+        var panel = searchRoots[r].FindChildTraverse(ids[i]);
+        if (IsValidPanel(panel) && IsValidPanel(panel.FindChildTraverse("charges"))) {
+          g_snipeAbilityPanel = panel;
+          g_snipeChargeSearchDiagnostic = "matched=" + panel.id + " tree=" + (treeRoot.id || "root");
+          return panel;
+        }
+      }
+    }
+
+    var pending = [{ panel: treeRoot, depth: 0 }];
+    var chargeLabelPaths = [];
+    while (pending.length > 0) {
+      var entry = pending.pop();
+      if (!IsValidPanel(entry.panel) || entry.depth > 40) continue;
+
+      if (entry.panel.id === "charges") {
+        var path = [];
+        var ancestor = entry.panel.GetParent();
+        var matchedAncestor = null;
+        for (var a = 0; IsValidPanel(ancestor) && a < 8; a++) {
+          var ancestorId = ancestor.id || "";
+          path.push(ancestorId || ancestor.paneltype || "Panel");
+          if (ids.indexOf(ancestorId) >= 0 || /hornet_snipe|hornet_assassinate|signature_4/i.test(ancestorId)) {
+            matchedAncestor = ancestor;
+            break;
+          }
+          ancestor = ancestor.GetParent();
+        }
+        if (matchedAncestor) {
+          g_snipeAbilityPanel = matchedAncestor;
+          g_snipeChargeSearchDiagnostic = "matched=" + (matchedAncestor.id || "panel") + " tree=" + (treeRoot.id || "root");
+          return matchedAncestor;
+        }
+        if (chargeLabelPaths.length < 12) {
+          chargeLabelPaths.push(path.join("<") + " text=" + entry.panel.text);
+        }
+      }
+
+      var children = entry.panel.Children ? entry.panel.Children() : [];
+      for (var c = 0; c < children.length; c++) {
+        pending.push({ panel: children[c], depth: entry.depth + 1 });
+      }
+    }
+
+    g_snipeChargeSearchDiagnostic = "tree=" + (treeRoot.id || "root") + " chargeLabels=" +
+                                    (chargeLabelPaths.length > 0 ? chargeLabelPaths.join(" | ") : "none");
     return null;
   }
 
@@ -153,6 +283,64 @@
     if (status === g_lastSnipeChargeStatus) return;
     g_lastSnipeChargeStatus = status;
     $.Msg("[VindictaSnipeCharges] " + status);
+  }
+
+  function ReadCurrentSnipeCharges(panel, label) {
+    var panels = [label, panel, IsValidPanel(panel) ? panel.FindChildTraverse("button_container") : null];
+    var names = ["charges", "current_charges", "currentCharges", "charge_count"];
+
+    for (var p = 0; p < panels.length; p++) {
+      if (!IsValidPanel(panels[p])) continue;
+      var text = "";
+      try { text = String(panels[p].text || ""); } catch (e) {}
+      var parsed = parseInt(text, 10);
+      if (!isNaN(parsed) && parsed >= 0) return { value: parsed, source: "text" };
+
+      try {
+        if (panels[p].GetAttributeString) {
+          var textAttribute = panels[p].GetAttributeString("text", "");
+          parsed = parseInt(textAttribute, 10);
+          if (!isNaN(parsed) && parsed >= 0) return { value: parsed, source: "text-attribute" };
+        }
+      } catch (e) {}
+
+      for (var n = 0; n < names.length; n++) {
+        var value = ReadIntegerAttribute(panels[p], names[n]);
+        if (value !== null) return { value: value, source: "attribute:" + names[n] };
+      }
+    }
+    return null;
+  }
+
+  function ReadSnipeChargesFromGameApi() {
+    try {
+      if (typeof Abilities === "undefined" || !Abilities.GetLocalPlayerAbility) return null;
+      var abilityIndex = Abilities.GetLocalPlayerAbility(3);
+      if (abilityIndex === null || abilityIndex === undefined || abilityIndex < 0) return null;
+
+      var abilityName = Abilities.GetAbilityName ? String(Abilities.GetAbilityName(abilityIndex) || "") : "";
+      if (abilityName && !/hornet_snipe|hornet_assassinate/i.test(abilityName)) return null;
+      if (!Abilities.GetAbilityCharges) return null;
+
+      var current = Abilities.GetAbilityCharges(abilityIndex);
+      if (typeof current !== "number" || isNaN(current) || current < 0) return null;
+
+      var maximum = null;
+      if (Abilities.GetAbilityMaxCharges) {
+        var apiMaximum = Abilities.GetAbilityMaxCharges(abilityIndex);
+        if (typeof apiMaximum === "number" && !isNaN(apiMaximum) && apiMaximum > 0) {
+          maximum = apiMaximum;
+        }
+      }
+
+      return {
+        current: current,
+        maximum: maximum,
+        source: "Abilities.GetLocalPlayerAbility(3)" + (abilityName ? ":" + abilityName : "")
+      };
+    } catch (e) {
+      return null;
+    }
   }
 
   function GetOrCreateSnipeChargePanel(root) {
@@ -177,6 +365,7 @@
     panel.style.marginTop = "-10%";
     panel.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
     panel.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
+    panel.style.flowChildren = "down";
     panel.style.transform = "translateY(20px)";
     panel.style.overflow = "noclip";
     panel.style.zIndex = "1000";
@@ -191,43 +380,97 @@
 
   function UpdateSnipeChargeIndicators(root, isAiming) {
     var panel = GetOrCreateSnipeChargePanel(root);
-    if (g_snipeChargeIcons.length === 0) {
-      var icon = $.CreatePanel("Panel", panel, "VindictaSnipeCharge_0");
-      icon.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/arm_psd.vtex')";
-      icon.style.backgroundSize = "100% 100%";
-      icon.style.backgroundRepeat = "no-repeat";
-      icon.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
-      icon.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
-      icon.style.washColor = "#00FF66";
-      icon.style.imgShadow = g_cachedCrtShadow;
+    var abilityPanel = FindSnipeAbilityPanel(root);
+    var chargesLabel = IsValidPanel(abilityPanel) ? abilityPanel.FindChildTraverse("charges") : null;
+    var currentCharges = g_snipeCurrentObserved;
+    var reportedMaximum = IsValidPanel(abilityPanel) ? ReadMaximumSnipeCharges(abilityPanel) : null;
+    var maximumCharges = reportedMaximum !== null ? Math.max(reportedMaximum, currentCharges) :
+                         Math.max(g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
+    var chargeSource = "fallback";
+    if (reportedMaximum !== null) {
+      g_snipeMaxObserved = maximumCharges;
+      chargeSource = "stack-divider:max=" + reportedMaximum;
+    }
+    var apiCharges = ReadSnipeChargesFromGameApi();
+
+    if (apiCharges) {
+      currentCharges = apiCharges.current;
+      g_snipeCurrentObserved = currentCharges;
+      maximumCharges = apiCharges.maximum !== null ? Math.max(apiCharges.maximum, currentCharges) :
+                       Math.max(maximumCharges, g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
+      g_snipeMaxObserved = maximumCharges;
+      chargeSource = apiCharges.source;
+    } else if (IsValidPanel(abilityPanel) && IsValidPanel(chargesLabel)) {
+      var chargeReading = ReadCurrentSnipeCharges(abilityPanel, chargesLabel);
+      if (chargeReading) {
+        currentCharges = chargeReading.value;
+        g_snipeCurrentObserved = currentCharges;
+
+        maximumCharges = Math.max(maximumCharges, g_snipeMaxObserved, SNIPE_BASE_MAX_CHARGES, currentCharges);
+        g_snipeMaxObserved = maximumCharges;
+        chargeSource = (abilityPanel.id || "abilityButton3") + "#charges(" + chargeReading.source + ") name=" + g_snipeAbilityNameDiagnostic;
+      } else {
+        var labelText = "";
+        try { labelText = String(chargesLabel.text || ""); } catch (e) {}
+        chargeSource = "unreadable-count button=" + (abilityPanel.id || "unknown") +
+                       " name=" + g_snipeAbilityNameDiagnostic +
+                       " label='" + labelText + "' " + g_snipeChargeSearchDiagnostic;
+      }
+    } else if (IsValidPanel(abilityPanel)) {
+      chargeSource = "missing-label:" + abilityPanel.id;
+    } else {
+      chargeSource = "panel-not-found " + g_snipeChargeSearchDiagnostic;
+    }
+
+    while (g_snipeChargeIcons.length < maximumCharges) {
+      var iconIndex = g_snipeChargeIcons.length;
+      var icon = $.CreatePanel("Panel", panel, "VindictaSnipeCharge_" + iconIndex);
       g_snipeChargeIcons.push(icon);
     }
-    while (g_snipeChargeIcons.length > 1) {
+    while (g_snipeChargeIcons.length > maximumCharges) {
       var removedIcon = g_snipeChargeIcons.pop();
       if (IsValidPanel(removedIcon)) removedIcon.DeleteAsync(0);
     }
 
     panel.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
-    panel.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
+    panel.style.height = (maximumCharges * (SNIPE_CHARGE_ICON_HEIGHT + SNIPE_CHARGE_ICON_GAP)) + "px";
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "center";
     panel.style.marginLeft = "-30%";
     panel.style.marginTop = "-10%";
     panel.style.transform = "translateY(20px)";
+    panel.style.flowChildren = "down";
     panel.style.zIndex = "1000";
     panel.style.visibility = "visible";
     panel.style.opacity = isAiming ? "1.0" : "0.0";
-    g_snipeChargeIcons[0].style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
-    g_snipeChargeIcons[0].style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
-    g_snipeChargeIcons[0].style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/arm_psd.vtex')";
-    g_snipeChargeIcons[0].style.backgroundSize = "100% 100%";
-    g_snipeChargeIcons[0].style.backgroundRepeat = "no-repeat";
-    g_snipeChargeIcons[0].style.visibility = "visible";
-    g_snipeChargeIcons[0].style.opacity = isAiming ? "1.0" : "0.0";
-    g_snipeChargeIcons[0].style.washColor = "#00FF66";
-    g_snipeChargeIcons[0].style.imgShadow = g_cachedCrtShadow;
-    panel.style.opacity = "1.0";
-    LogSnipeChargeStatus("scope " + (isAiming ? "active" : "inactive"));
+    for (var i = 0; i < g_snipeChargeIcons.length; i++) {
+      var chargeIcon = g_snipeChargeIcons[i];
+      chargeIcon.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
+      chargeIcon.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
+      chargeIcon.style.marginBottom = SNIPE_CHARGE_ICON_GAP + "px";
+      chargeIcon.style.backgroundImage = null;
+      chargeIcon.style.visibility = "visible";
+      chargeIcon.style.opacity = isAiming ? (i < currentCharges ? "1.0" : SNIPE_SPENT_OPACITY) : "0.0";
+
+      var chargeImage = chargeIcon.FindChildTraverse("VindictaSnipeChargeImage_" + i);
+      if (!IsValidPanel(chargeImage)) {
+        chargeImage = $.CreatePanel("Image", chargeIcon, "VindictaSnipeChargeImage_" + i);
+        chargeImage.SetImage("s2r://panorama/images/hud/crosshair/arm_psd.vtex");
+      }
+      chargeImage.style.width = "100%";
+      chargeImage.style.height = "100%";
+      chargeImage.style.horizontalAlign = "center";
+      chargeImage.style.verticalAlign = "center";
+      chargeImage.style.visibility = "visible";
+      chargeImage.style.washColor = "#00FF66";
+      chargeImage.style.imgShadow = g_cachedCrtShadow;
+      try {
+        if (chargeImage.SetScaling) chargeImage.SetScaling("stretch-to-fit-preserve-aspect");
+      } catch (e) {}
+    }
+    LogSnipeChargeStatus("source=" + chargeSource + " current=" + currentCharges + " max=" + maximumCharges +
+               " panel=" + (IsValidPanel(abilityPanel) ? abilityPanel.id : "missing") +
+               " scope=" + (isAiming ? "active" : "inactive"));
   }
 
   function HideSnipeChargeIndicators() {
@@ -971,10 +1214,10 @@
                 }
               }
 
-              MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
+              //MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
             } else {
               HideSnipeChargeIndicators();
-              MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
+              //MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
             }
           } else {
             LogSnipeChargeStatus("Vindicta hero not detected: " + (hero || "none"));
