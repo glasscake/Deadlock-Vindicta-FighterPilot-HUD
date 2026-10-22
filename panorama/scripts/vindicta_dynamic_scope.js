@@ -24,7 +24,7 @@
   var g_scopeImg = null;
 
   var g_lastOpacity = -1.0;
-  var g_lastAimingState = false;
+  var g_lastSnipeActiveState = false;
   var g_isNativeHidden = false;
   var g_isMaskHidden = false;
 
@@ -282,6 +282,15 @@
     return null;
   }
 
+  function IsSnipeAbilityActive(root) {
+    var abilityPanel = FindSnipeAbilityPanel(root);
+    try {
+      return IsValidPanel(abilityPanel) && abilityPanel.BHasClass("active");
+    } catch (e) {
+      return false;
+    }
+  }
+
   function LogSnipeChargeStatus(status) {
     if (status === g_lastSnipeChargeStatus) return;
     g_lastSnipeChargeStatus = status;
@@ -410,7 +419,7 @@
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "center";
     panel.style.marginLeft = "-30%";
-    panel.style.marginTop = "0%";
+    panel.style.marginTop = "-5%";
     panel.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
     panel.style.height = SNIPE_CHARGE_ICON_HEIGHT + "px";
     panel.style.flowChildren = "down";
@@ -427,9 +436,14 @@
     return g_snipeChargePanel;
   }
 
-  function UpdateSnipeChargeIndicators(root, isAiming) {
+  function UpdateSnipeChargeIndicators(root) {
     var panel = GetOrCreateSnipeChargePanel(root);
     var abilityPanel = FindSnipeAbilityPanel(root);
+    var isUltimateActive = false;
+    try {
+      isUltimateActive = IsValidPanel(abilityPanel) && abilityPanel.BHasClass("active");
+    } catch (e) {}
+    var showIndicators = isUltimateActive;
     var chargesLabel = IsValidPanel(abilityPanel) ? abilityPanel.FindChildTraverse("charges") : null;
     var reportedMaximum = IsValidPanel(abilityPanel) ? ReadMaximumSnipeCharges(abilityPanel) : null;
     var maximumCharges = reportedMaximum !== null ? Math.max(reportedMaximum, g_snipeHasObservedCurrent ? g_snipeCurrentObserved : 0) :
@@ -501,12 +515,12 @@
     panel.style.horizontalAlign = "center";
     panel.style.verticalAlign = "center";
     panel.style.marginLeft = "-30%";
-    panel.style.marginTop = "-10%";
+    panel.style.marginTop = "-5%";
     panel.style.transform = "translateY(20px)";
     panel.style.flowChildren = "down";
     panel.style.zIndex = "1000";
     panel.style.visibility = "visible";
-    panel.style.opacity = isAiming ? "1.0" : "0.0";
+    panel.style.opacity = showIndicators ? "1.0" : "0.0";
     for (var i = 0; i < g_snipeChargeIcons.length; i++) {
       var chargeIcon = g_snipeChargeIcons[i];
       chargeIcon.style.width = SNIPE_CHARGE_ICON_WIDTH + "px";
@@ -514,7 +528,7 @@
       chargeIcon.style.marginBottom = SNIPE_CHARGE_ICON_GAP + "px";
       chargeIcon.style.backgroundImage = null;
       chargeIcon.style.visibility = "visible";
-      chargeIcon.style.opacity = isAiming ? "1.0" : "0.0";
+      chargeIcon.style.opacity = showIndicators ? "1.0" : "0.0";
 
       var chargeImage = chargeIcon.FindChildTraverse("VindictaSnipeChargeImage_" + i);
       if (!IsValidPanel(chargeImage)) {
@@ -539,7 +553,7 @@
     LogSnipeChargeStatus("source=" + chargeSource + " current=" + currentCharges + " max=" + maximumCharges +
                          " currentSource=" + currentChargeSource +
                " panel=" + (IsValidPanel(abilityPanel) ? abilityPanel.id : "missing") +
-               " scope=" + (isAiming ? "active" : "inactive"));
+               " ultClass=" + (isUltimateActive ? "active" : "inactive"));
   }
 
   function HideSnipeChargeIndicators() {
@@ -1082,38 +1096,16 @@
         if (root) {
           var hero = DetectCurrentHero(root);
           if (hero === VINDICTA_HERO_NAME) {
+            var isSnipeActive = IsSnipeAbilityActive(root);
+            UpdateSnipeChargeIndicators(root);
             var panels = GetLocalProgressPanels();
             if (panels.progress) {
               var progressInfo = ReadProgressValue(panels.progress);
               
               var rawVal = progressInfo.value;
               var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
-              var isAiming = nextOpacity > 0.0;
 
-              try {
-                if (g_progressElement && (g_progressElement.style.visibility === "collapse" || g_progressElement.BHasClass("Hidden") || g_progressElement.actualvisibility === "collapse" || g_progressElement.visible === false)) {
-                  isAiming = false;
-                }
-                var tempScope = GetScopeImg(root);
-                if (tempScope && (tempScope.style.visibility === "collapse" || tempScope.BHasClass("Hidden") || tempScope.actualvisibility === "collapse" || tempScope.visible === false)) {
-                  isAiming = false;
-                }
-              } catch (e) {}
-
-              if (isAiming && nextOpacity > 0.0 && nextOpacity < 1.0) {
-                if (nextOpacity === g_prevRawProgress) {
-                  SyncLoop.stuckFrames = (SyncLoop.stuckFrames || 0) + 1;
-                  if (SyncLoop.stuckFrames > 6) {
-                    isAiming = false;
-                  }
-                } else {
-                  SyncLoop.stuckFrames = 0;
-                }
-              } else {
-                SyncLoop.stuckFrames = 0;
-              }
-
-              if (!isAiming) {
+              if (!isSnipeActive) {
                 var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
                 if (rogueCompass) {
                   rogueCompass.DeleteAsync(0);
@@ -1126,7 +1118,6 @@
               HideNativeProgress(panels.progress, panels.backer);
 
               var scopeImg = GetScopeImg(root);
-              UpdateSnipeChargeIndicators(root, isAiming && IsValidPanel(scopeImg));
               if (scopeImg) {
                 var chevrons = GetOrCreateChevronPanels(scopeImg);
                 var statusText = GetOrCreateStatusPanels(scopeImg);
@@ -1135,7 +1126,7 @@
                 var isClimbing = nextOpacity >= g_prevRawProgress;
                 g_prevRawProgress = nextOpacity;
 
-                if (isAiming) nextInterval = ACTIVE_INTERVAL;
+                if (isSnipeActive) nextInterval = ACTIVE_INTERVAL;
 
                 var now = Date.now();
                 if (!g_lastFlickerTime || (now - g_lastFlickerTime) > 30) {
@@ -1148,13 +1139,13 @@
                 }
 
                 var progressChanged = Math.abs(g_lastOpacity - nextOpacity) > 0.002;
-                if (progressChanged || g_lastAimingState !== isAiming || isAiming) {
+                if (progressChanged || g_lastSnipeActiveState !== isSnipeActive || isSnipeActive) {
                   var MAX_PIXEL_OFFSET = 180;
                   
                   var normalizedProgress = isClimbing ? (1.0 - nextOpacity) : nextOpacity;
                   var currentOffset = MAX_PIXEL_OFFSET * normalizedProgress;
 
-                  if (isAiming) {
+                  if (isSnipeActive) {
                     var compass = GetOrCreateCompassPanel(root);
                     
                     var currentYaw = GetMinimapYaw(root) + 90.0; 
@@ -1278,14 +1269,13 @@
                   }
 
                   g_lastOpacity = nextOpacity;
-                  g_lastAimingState = isAiming;
-                  g_isMaskHidden = !isAiming;
+                  g_lastSnipeActiveState = isSnipeActive;
+                  g_isMaskHidden = !isSnipeActive;
                 }
               }
 
               //MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
             } else {
-              HideSnipeChargeIndicators();
               //MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
             }
           } else {
@@ -1318,7 +1308,7 @@
               
               g_isMaskHidden = true;
               g_lastOpacity = 0.0;
-              g_lastAimingState = false;
+              g_lastSnipeActiveState = false;
             }
             var localPanels = GetLocalProgressPanels();
             if (localPanels.progress) {
@@ -1362,7 +1352,7 @@
     g_progressElement = null;
 
     g_lastOpacity = -1.0;
-    g_lastAimingState = false;
+    g_lastSnipeActiveState = false;
     g_isNativeHidden = false;
     g_isMaskHidden = false;
     g_prevRawProgress = 0.0;
