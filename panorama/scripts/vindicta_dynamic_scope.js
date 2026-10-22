@@ -6,7 +6,7 @@
   var HERO_RECHECK_INTERVAL = 2.0;
   var DEBUG_LOG_INTERVAL = 1.0;
   var VINDICTA_HERO_NAME = "hornet";
-  var DEBUG = true;
+  var DEBUG = false;
 
   var g_schedulerId = null;
   var g_hudRoot = null;
@@ -118,41 +118,17 @@
   }
 
   function ReadMaximumSnipeCharges(panel) {
-    var names = ["max_charges", "maxCharges", "charges_max", "max_charge_count", "AbilityCharges", "ability_charges"];
-    var maximum = null;
-
     var dividerContainer = panel.FindChildTraverse("stack_divider_container");
-    if (IsValidPanel(dividerContainer)) {
-      var dividerCount = 0;
-      var dividerChildren = dividerContainer.Children ? dividerContainer.Children() : [];
-      for (var d = 0; d < dividerChildren.length; d++) {
-        try {
-          if (dividerChildren[d].BHasClass && dividerChildren[d].BHasClass("stack_divider")) dividerCount++;
-        } catch (e) {}
-      }
-      if (dividerCount > 0) maximum = dividerCount + 1;
+    if (!IsValidPanel(dividerContainer)) return null;
+
+    var dividerCount = 0;
+    var dividerChildren = dividerContainer.Children ? dividerContainer.Children() : [];
+    for (var d = 0; d < dividerChildren.length; d++) {
+      try {
+        if (dividerChildren[d].BHasClass && dividerChildren[d].BHasClass("stack_divider")) dividerCount++;
+      } catch (e) {}
     }
-
-    var pending = [{ panel: panel, depth: 0 }];
-
-    while (pending.length > 0) {
-      var entry = pending.pop();
-      if (!IsValidPanel(entry.panel) || entry.depth > 8) continue;
-
-      for (var i = 0; i < names.length; i++) {
-        var value = ReadIntegerAttribute(entry.panel, names[i]);
-        if (value !== null && value > 0 && (maximum === null || value > maximum)) {
-          maximum = value;
-        }
-      }
-
-      var children = entry.panel.Children ? entry.panel.Children() : [];
-      for (var c = 0; c < children.length; c++) {
-        pending.push({ panel: children[c], depth: entry.depth + 1 });
-      }
-    }
-
-    return maximum;
+    return dividerCount > 0 ? dividerCount + 1 : null;
   }
 
   function FindPanelByClass(root, className) {
@@ -170,6 +146,10 @@
   }
 
   function FindSnipeAbilityPanel(root) {
+    if (IsValidPanel(g_snipeAbilityPanel) && g_snipeAbilityPanel.id === "slot_signature_4") {
+      return g_snipeAbilityPanel;
+    }
+
     var signatureSlot = root.FindChildTraverse("slot_signature_4");
     if (IsValidPanel(signatureSlot) &&
         (IsValidPanel(signatureSlot.FindChildTraverse("stack_divider_container")) ||
@@ -292,7 +272,7 @@
   }
 
   function LogSnipeChargeStatus(status) {
-    if (status === g_lastSnipeChargeStatus) return;
+    if (!DEBUG || status === g_lastSnipeChargeStatus) return;
     g_lastSnipeChargeStatus = status;
     $.Msg("[VindictaSnipeCharges] " + status);
   }
@@ -622,29 +602,53 @@
     return 0.0;
   }
 
-  function ReadFlightDurationProgress(root) {
+  function HasPanelClass(panel, className) {
     try {
-      // Target the exact panel from the log dump
-      var clippedLabel = root.FindChildTraverse("ability_name_clipped");
-      
+      return IsValidPanel(panel) && panel.BHasClass && panel.BHasClass(className);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  var g_flightProgressPanel = null;
+  var g_flightClippedLabel = null;
+  var g_lastFlightPanelSearchTime = 0;
+
+  function FindFlightDurationPanel(root) {
+    if (IsValidPanel(g_flightProgressPanel) && IsValidPanel(g_flightClippedLabel)) return g_flightProgressPanel;
+
+    var now = Date.now();
+    if ((now - g_lastFlightPanelSearchTime) < 500) return null;
+    g_lastFlightPanelSearchTime = now;
+
+    var gameplayHud = root.FindChildTraverse("gameplay_hud");
+    var crosshair = IsValidPanel(gameplayHud) ? gameplayHud.FindChildTraverse("crosshair") : null;
+    var progressPanel = IsValidPanel(crosshair) ? crosshair.FindChildTraverse("progress") : null;
+    var clippedLabel = IsValidPanel(progressPanel) ? progressPanel.FindChildTraverse("ability_name_clipped") : null;
+    if (!IsValidPanel(clippedLabel)) return null;
+
+    g_flightProgressPanel = progressPanel;
+    g_flightClippedLabel = clippedLabel;
+    return progressPanel;
+  }
+
+  function IsFlightProgressLeaping(panel) {
+    return HasPanelClass(panel, "leaping") ||
+           HasPanelClass(panel, "Citadel_ability_hornet_leap") ||
+           HasPanelClass(panel, "citadel_ability_hornet_leap");
+  }
+
+  function ReadFlightDurationProgress(flightPanel) {
+    try {
+      var clippedLabel = flightPanel === g_flightProgressPanel ? g_flightClippedLabel : null;
       if (IsValidPanel(clippedLabel) && clippedLabel.style && clippedLabel.style.clip) {
-        var clipStr = clippedLabel.style.clip;
-        
-        // Example clip string: rect( 0.0%, 19.403957%, 100.0%, 0.0%)
-        // This regex extracts all numbers followed by a % symbol
-        var matches = clipStr.match(/(\d+(?:\.\d+)?)%/g);
-        
+        var matches = clippedLabel.style.clip.match(/(\d+(?:\.\d+)?)%/g);
         if (matches && matches.length >= 2) {
-          // The second percentage is the 'right' clip bound dictating the bar width
-          var widthPercent = parseFloat(matches[1]);
-          if (!isNaN(widthPercent)) {
-            // Convert 0-100% to a 0.0 - 1.0 ratio
-            return widthPercent / 100.0;
-          }
+          var elapsedPercent = parseFloat(matches[1]);
+          if (!isNaN(elapsedPercent)) return Math.max(0.0, Math.min(1.0, elapsedPercent / 100.0));
         }
       }
     } catch (e) {}
-    
     return null;
   }
 
@@ -1222,27 +1226,14 @@
                     // --- DYNAMIC FLIGHT DURATION READOUT (9999 -> 0000) ---
                     g_altimeterDisplay.GetOrCreate(root);
 
-                    var cancelPrompt = root.FindChildTraverse("citadel_ability_hornet_leap_cancel_single_ability");
-                    var isFlying = false;
-                    if (IsValidPanel(cancelPrompt)) {
-                      var isHidden = cancelPrompt.BHasClass("Hidden") ||
-                                     cancelPrompt.style.visibility === "collapse" ||
-                                     cancelPrompt.visible === false;
-                      isFlying = !isHidden;
-                    }
-
+                    var flightPanel = FindFlightDurationPanel(root);
+                    var progressRatio = ReadFlightDurationProgress(flightPanel);
+                    var isFlying = progressRatio !== null && progressRatio > 0.0 && progressRatio < 1.0;
                     var flightValue = 0;
 
                     if (isFlying) {
-                      var progressRatio = ReadFlightDurationProgress(root);
-                      
-                      if (progressRatio !== null) {
-                        // Invert the ratio (1.0 - progressRatio) so it counts DOWN instead of UP
-                        var remainingRatio = 1.0 - progressRatio;
-                        flightValue = Math.floor(Math.max(0.0, Math.min(1.0, remainingRatio)) * 9999);
-                      } else {
-                        flightValue = 9999;
-                      }
+                      var remainingRatio = 1.0 - progressRatio;
+                      flightValue = Math.floor(remainingRatio * 9999);
                     } else {
                       flightValue = 0;
                     }
