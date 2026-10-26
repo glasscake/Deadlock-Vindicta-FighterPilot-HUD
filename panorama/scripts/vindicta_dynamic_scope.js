@@ -1,12 +1,15 @@
 (function () {
   "use strict";
 
+  var ENABLE_SOUNDS = true;
+
   var ACTIVE_INTERVAL = 0.016;
   var IDLE_INTERVAL = 0.15;
   var HERO_RECHECK_INTERVAL = 2.0;
   var DEBUG_LOG_INTERVAL = 1.0;
   var VINDICTA_HERO_NAME = "hornet";
   var DEBUG = false;
+
 
   var g_schedulerId = null;
   var g_hudRoot = null;
@@ -52,6 +55,14 @@
   var SNIPE_CHARGE_ICON_GAP = 5;
   var SNIPE_AVAILABLE_TEXTURE = "s2r://panorama/images/hud/crosshair/arm_psd.vtex";
   var SNIPE_SPENT_TEXTURE = "s2r://panorama/images/hud/crosshair/armspent_psd.vtex";
+  var SCOPE_BEEP_INTERVAL = 0.535;
+  var FIRE_BEEP_INTERVAL = 0.170;
+  var ALTITUDE_BEEP_INTERVAL = 2.0;
+  var PULLUP_BEEP_INTERVAL = 1.5;
+  var SCOPE_LOCK_SOUND = "Hornet.Assassinate.Jetsounds.LockBeep";
+  var SCOPE_FIRE_SOUND = "Hornet.Assassinate.Jetsounds.FireBeep";
+  var ALTITUDE_BEEP_SOUND = "Hornet.Assassinate.Jetsounds.Altitude";
+  var PULLUP_BEEP_SOUND = "Hornet.Assassinate.Jetsounds.PullUp2x";
   var g_snipeChargePanel = null;
   var g_snipeChargeIcons = [];
   var g_snipeChargeTextures = [];
@@ -63,6 +74,88 @@
   var g_snipeAbilityNameDiagnostic = "unknown";
   var g_lastSnipeAbilitySearchTime = 0;
   var g_snipeChargeSearchDiagnostic = "";
+  var g_scopeBeepScheduleId = null;
+  var g_scopeBeepLoopActive = false;
+  var g_scopeBeepEventName = null;
+  var g_scopeBeepInterval = 0.0;
+  var g_warningBeepScheduleId = null;
+  var g_warningBeepEventName = null;
+  var g_warningBeepInterval = 0.0;
+
+  function PlayWarningBeepLoop() {
+    g_warningBeepScheduleId = null;
+    if (!ENABLE_SOUNDS || !g_warningBeepEventName || typeof PlayUISoundEvent !== "function") return;
+
+    try {
+      PlayUISoundEvent(g_warningBeepEventName);
+    } catch (e) {
+      g_warningBeepEventName = null;
+      g_warningBeepInterval = 0.0;
+      return;
+    }
+
+    g_warningBeepScheduleId = $.Schedule(g_warningBeepInterval, PlayWarningBeepLoop);
+  }
+
+  function SetWarningBeepLoop(eventName, interval) {
+    if (!ENABLE_SOUNDS || !eventName) {
+      g_warningBeepEventName = null;
+      g_warningBeepInterval = 0.0;
+      if (g_warningBeepScheduleId) {
+        $.CancelScheduled(g_warningBeepScheduleId);
+        g_warningBeepScheduleId = null;
+      }
+      return;
+    }
+
+    if (g_warningBeepEventName === eventName && g_warningBeepInterval === interval) return;
+    if (g_warningBeepScheduleId) {
+      $.CancelScheduled(g_warningBeepScheduleId);
+      g_warningBeepScheduleId = null;
+    }
+    g_warningBeepEventName = eventName;
+    g_warningBeepInterval = interval;
+    PlayWarningBeepLoop();
+  }
+
+  function PlayScopeBeepLoop() {
+    g_scopeBeepScheduleId = null;
+    if (!ENABLE_SOUNDS || !g_scopeBeepLoopActive || !g_scopeBeepEventName || typeof PlayUISoundEvent !== "function") return;
+
+    try {
+      PlayUISoundEvent(g_scopeBeepEventName);
+    } catch (e) {
+      g_scopeBeepLoopActive = false;
+      g_scopeBeepEventName = null;
+      g_scopeBeepInterval = 0.0;
+      return;
+    }
+
+    g_scopeBeepScheduleId = $.Schedule(g_scopeBeepInterval, PlayScopeBeepLoop);
+  }
+
+  function SetScopeBeepLoop(eventName, interval) {
+    if (!ENABLE_SOUNDS || !eventName) {
+      g_scopeBeepLoopActive = false;
+      g_scopeBeepEventName = null;
+      g_scopeBeepInterval = 0.0;
+      if (g_scopeBeepScheduleId) {
+        $.CancelScheduled(g_scopeBeepScheduleId);
+        g_scopeBeepScheduleId = null;
+      }
+      return;
+    }
+
+    if (g_scopeBeepLoopActive && g_scopeBeepEventName === eventName && g_scopeBeepInterval === interval) return;
+    if (g_scopeBeepScheduleId) {
+      $.CancelScheduled(g_scopeBeepScheduleId);
+      g_scopeBeepScheduleId = null;
+    }
+    g_scopeBeepLoopActive = true;
+    g_scopeBeepEventName = eventName;
+    g_scopeBeepInterval = interval;
+    PlayScopeBeepLoop();
+  }
 
   function IsValidPanel(p) {
     try {
@@ -816,6 +909,14 @@
           this.warningStartTime = now;
         }
 
+        if (warningMode === "altitude") {
+          SetWarningBeepLoop(ALTITUDE_BEEP_SOUND, ALTITUDE_BEEP_INTERVAL);
+        } else if (warningMode === "pullup") {
+          SetWarningBeepLoop(PULLUP_BEEP_SOUND, PULLUP_BEEP_INTERVAL);
+        } else {
+          SetWarningBeepLoop(null, 0.0);
+        }
+
         this.altImage.style.washColor = "#00FF66";
         this.altImage.style.imgShadow = crtShadow;
         this.pullUpImage.style.washColor = "#00FF66";
@@ -843,6 +944,7 @@
       }
       if (IsValidPanel(this.altImage)) this.altImage.style.opacity = "0.0";
       if (IsValidPanel(this.pullUpImage)) this.pullUpImage.style.opacity = "0.0";
+      SetWarningBeepLoop(null, 0.0);
       this.warningMode = null;
       this.warningStartTime = 0;
     },
@@ -856,6 +958,7 @@
       this.altImage = null;
       this.pullUpImage = null;
       this.strips = [];
+      SetWarningBeepLoop(null, 0.0);
       this.warningMode = null;
       this.warningStartTime = 0;
     }
@@ -1208,6 +1311,11 @@
                     ladders.right.style.transform = "translateX(30%) translateY(" + driftY.toFixed(1) + "px)";
 
                     var isFullyLocked = normalizedProgress <= 0.05;
+
+                    SetScopeBeepLoop(
+                      isFullyLocked ? SCOPE_FIRE_SOUND : SCOPE_LOCK_SOUND,
+                      isFullyLocked ? FIRE_BEEP_INTERVAL : SCOPE_BEEP_INTERVAL
+                    );
                     
                     if (!isFullyLocked) {
                       var lockFlashOn = (now % 350) < 175;
@@ -1241,6 +1349,7 @@
                     g_altimeterDisplay.Update(flightValue, g_cachedCrtShadow);
 
                   } else {
+                    SetScopeBeepLoop(null, 0.0);
                     if (IsValidPanel(g_compassPanel)) {
                       g_compassPanel.DeleteAsync(0);
                       g_compassPanel = null;
@@ -1267,9 +1376,11 @@
 
               //MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
             } else {
+              SetScopeBeepLoop(null, 0.0);
               //MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
             }
           } else {
+            SetScopeBeepLoop(null, 0.0);
             LogSnipeChargeStatus("Vindicta hero not detected: " + (hero || "none"));
             HideSnipeChargeIndicators();
             if (IsValidPanel(g_scopeImg)) {
@@ -1344,6 +1455,7 @@
 
     g_lastOpacity = -1.0;
     g_lastSnipeActiveState = false;
+    SetScopeBeepLoop(null, 0.0);
     g_isNativeHidden = false;
     g_isMaskHidden = false;
     g_prevRawProgress = 0.0;
