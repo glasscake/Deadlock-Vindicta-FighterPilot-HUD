@@ -7,6 +7,7 @@
   var IDLE_INTERVAL = 0.15;
   var HERO_RECHECK_INTERVAL = 2.0;
   var DEBUG_LOG_INTERVAL = 1.0;
+  var FLIGHT_COMPLETE_EPSILON = 0.001;
   var VINDICTA_HERO_NAME = "hornet";
   var DEBUG = false;
 
@@ -738,7 +739,10 @@
         var matches = clippedLabel.style.clip.match(/(\d+(?:\.\d+)?)%/g);
         if (matches && matches.length >= 2) {
           var elapsedPercent = parseFloat(matches[1]);
-          if (!isNaN(elapsedPercent)) return Math.max(0.0, Math.min(1.0, elapsedPercent / 100.0));
+          if (!isNaN(elapsedPercent)) {
+            var elapsedRatio = Math.max(0.0, Math.min(1.0, elapsedPercent / 100.0));
+            return elapsedRatio >= 1.0 - FLIGHT_COMPLETE_EPSILON ? 1.0 : elapsedRatio;
+          }
         }
       }
     } catch (e) {}
@@ -907,14 +911,14 @@
         if (warningMode !== this.warningMode) {
           this.warningMode = warningMode;
           this.warningStartTime = now;
-        }
 
-        if (warningMode === "altitude") {
-          SetWarningBeepLoop(ALTITUDE_BEEP_SOUND, ALTITUDE_BEEP_INTERVAL);
-        } else if (warningMode === "pullup") {
-          SetWarningBeepLoop(PULLUP_BEEP_SOUND, PULLUP_BEEP_INTERVAL);
-        } else {
-          SetWarningBeepLoop(null, 0.0);
+          if (warningMode === "altitude") {
+            SetWarningBeepLoop(ALTITUDE_BEEP_SOUND, ALTITUDE_BEEP_INTERVAL);
+          } else if (warningMode === "pullup") {
+            SetWarningBeepLoop(PULLUP_BEEP_SOUND, PULLUP_BEEP_INTERVAL);
+          } else {
+            SetWarningBeepLoop(null, 0.0);
+          }
         }
 
         this.altImage.style.washColor = "#00FF66";
