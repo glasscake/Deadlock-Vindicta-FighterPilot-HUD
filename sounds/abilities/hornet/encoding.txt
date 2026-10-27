@@ -10,11 +10,11 @@
 	files =
 	[
 		{
-			fileName = "vindicta_flight_loop_jet.mp3"
+			fileName = "vindicta_flight_loop_jet.wav"
 			loop =
 			{    
 				loop_start_time = 0
-				loop_end_time =  60.0
+				loop_end_time =  59.9
 			}
 		}
 	]

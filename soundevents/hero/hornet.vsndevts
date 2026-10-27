@@ -308,7 +308,7 @@
 		volume_fade_out = 0.25
 		volume_fade_in = 0.1
 		volume_offset_player = 0.0
-		volume_offset_team = 0.0
+		volume_offset_team = -9.0
 		delay_rand_max = -20.0
 		vsnd_files = "sounds/abilities/hornet/vindicta_flight_loop_jet.vsnd"
 		vsnd_duration = 60.0
