@@ -1,0 +1,522 @@
+<!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:generic:version{7412167c-06e9-4698-aff2-e63eb59037e7} -->
+{
+	Vindicta.Wpn.Fire = 
+	{
+		base = "Base.Weapon.Rifle"
+		volume = 3.0
+		last_shot_vol_offset_db = 1.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/vindicta_wpn_fire_main_01.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_main_02.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_main_03.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_main_04.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_main_05.vsnd",
+		]
+		vsnd_files_tail = 
+		[
+			"sounds/weapons/hornet/vindicta_wpn_fire_tail_ext_01.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_tail_ext_02.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_tail_ext_03.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_tail_ext_04.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_tail_ext_05.vsnd",
+		]
+		vsnd_files_last_shot = 
+		[
+			"sounds/weapons/hornet/vindicta_wpn_last_shot_01.vsnd",
+		]
+		fire_rate_percent_curve_db_offset = 
+		[
+			[
+				0.0, 0.0, 0.0, -0.059997,
+				0.0, 0.0,
+			],
+			[
+				100.0, -4.0, -0.059997, 0.0,
+				0.0, 0.0,
+			],
+		]
+		continuous_fire_time_curve_db_offset = 
+		[
+			[
+				0.0, 0.0, 0.0, 0.0,
+				0.0, 0.0,
+			],
+			[
+				1.0, 0.0, 0.0, -1.001785,
+				0.0, 0.0,
+			],
+			[
+				3.0, -3.0, -1.001785, -1.001785,
+				0.0, 1.0,
+			],
+		]
+		vsnd_duration = 3.00195
+	}
+	Vindicta.Wpn.Fire.First = 
+	{
+		base = "Vindicta.Wpn.Fire"
+		limiter_max = 0.0
+		transient_offset_db = 3.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/vindicta_wpn_fire_first_01.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_first_02.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_first_03.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_first_04.vsnd",
+			"sounds/weapons/hornet/vindicta_wpn_fire_first_05.vsnd",
+		]
+		vsnd_duration = 3.001927
+	}
+	Vindicta.Wpn.Impact = 
+	{
+		base = "Base.Bullet.Impact"
+		volume = 0.0
+		vsnd_files = "sounds/common/null.vsnd"
+		vsnd_duration = 0.050023
+	}
+	Vindicta.Wpn.Whizby = 
+	{
+		base = "Base.Bullet.Whizby"
+		volume = -3.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-001.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-002.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-003.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-004.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-005.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-006.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-007.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-008.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-009.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupA-010.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-001.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-002.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-003.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-004.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-005.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-006.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-007.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-008.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-009.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupB-010.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-001.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-002.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-003.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-004.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-005.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-006.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-007.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-008.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-009.vsnd",
+			"sounds/weapons/hornet/vindicta_weapon_whizby_groupC-010.vsnd",
+		]
+		vsnd_duration = 0.395057
+	}
+	Vindicta.Wpn.ZoomIn = 
+	{
+		base = "Base.Weapon.Foley"
+		volume = -16.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_in_01.vsnd",
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_in_02.vsnd",
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_in_03.vsnd",
+		]
+		vsnd_duration = 0.49415
+	}
+	Vindicta.Wpn.ZoomOut = 
+	{
+		base = "Base.Weapon.Foley"
+		volume = -16.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_out_01.vsnd",
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_out_02.vsnd",
+			"sounds/weapons/hornet/zoom/vindicta_wpn_zoom_out_03.vsnd",
+		]
+		vsnd_duration = 0.425125
+	}
+	Vindicta.Wpn.Reload.Start = 
+	{
+		base = "Base.Weapon.Foley"
+		volume = -3.0
+		mono_downmix_enabled = 0.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_start_01.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_start_02.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_start_03.vsnd",
+		]
+		vsnd_duration = 2.109841
+	}
+	Vindicta.Wpn.Reload.Mid = 
+	{
+		base = "Base.Weapon.Foley"
+		volume = -3.0
+		mono_downmix_enabled = 0.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_mid_01.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_mid_02.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_mid_03.vsnd",
+		]
+		vsnd_duration = 0.693764
+	}
+	Vindicta.Wpn.Reload.End = 
+	{
+		base = "Base.Weapon.Foley"
+		volume = -3.0
+		mono_downmix_enabled = 0.0
+		vsnd_files = 
+		[
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_end_01.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_end_02.vsnd",
+			"sounds/weapons/hornet/reload/vindicta_wpn_reload_end_03.vsnd",
+		]
+		vsnd_duration = 0.520839
+	}
+	Vindicta.Stake.Cast = 
+	{
+		base = "Base.Ability.Cast"
+		volume = 0.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_stake_cast_01.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_cast_02.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_cast_03.vsnd",
+		]
+		vsnd_duration = 2.260612
+	}
+	Vindicta.Stake.Select = 
+	{
+		base = "Base.Ability"
+		volume = -5.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_stake_select_01.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_select_02.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_select_03.vsnd",
+		]
+		vsnd_duration = 1.124172
+	}
+	Vindicta.Stake.Select.Lp = 
+	{
+		base = "Base.Ability"
+		volume = -4.0
+		volume_fade_in = 0.1
+		volume_fade_out = 0.7
+		delay_rand_min = -3.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_stake_select_lp_01.vsnd"
+		vsnd_duration = 5.977166
+	}
+	Vindicta.Stake.Deselect = 
+	{
+		base = "Base.Ability"
+		volume = -5.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_stake_deselect_01.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_deselect_02.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_deselect_03.vsnd",
+		]
+		vsnd_duration = 1.15805
+	}
+	Vindicta.Stake.Explode = 
+	{
+		base = "Base.Ability.Detached"
+		volume = 1.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_stake_explosion_01.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_explosion_02.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_explosion_03.vsnd",
+		]
+		vsnd_duration = 2.468186
+	}
+	Vindicta.Stake.Hit = 
+	{
+		base = "Base.Ability.Hit"
+		volume = 0.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_stake_hit_01.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_hit_02.vsnd",
+			"sounds/abilities/hornet/vindicta_stake_hit_03.vsnd",
+		]
+		vsnd_duration = 1.571565
+	}
+	Vindicta.Stake.Debuff.Lp = 
+	{
+		base = "Base.Ability.StatusEffect"
+		volume = -4.0
+		volume_fade_in = 0.1
+		volume_fade_out = 0.7
+		delay_rand_min = -3.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_stake_debuff_lp_01.vsnd"
+		vsnd_duration = 4.99907
+	}
+	Vindicta.Stake.Proj.Lp = 
+	{
+		base = "Base.Ability.Projectile"
+		volume = -2.0
+		volume_fade_in = 0.1
+		volume_fade_out = 0.2
+		delay_rand_min = -2.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_stake_proj_lp_01.vsnd"
+		vsnd_duration = 5.977166
+	}
+	Vindicta.Leap.Cast = 
+	{
+		base = "Base.Ability.Cast"
+		volume = -2.0
+		volume_offset_team = -3.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_flight_cast.vsnd"
+		vsnd_duration = 4.656236
+	}
+	Vindicta.Leap.Lp = 
+	{
+		base = "Base.Ability.Telegraph"
+		volume = -3.0
+		volume_fade_out = 0.25
+		volume_fade_in = 0.1
+		volume_offset_player = -9.0
+		volume_offset_team = -9.0
+		delay_rand_max = -20.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_flight_loop.vsnd"
+		vsnd_duration = 24.67
+	}
+	Vindicta.Leap.Expire = 
+	{
+		base = "Base.Ability"
+		volume = -9.0
+		volume_offset_team = -3.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_flight_expire.vsnd"
+		vsnd_duration = 2.372494
+	}
+	Vindicta.Crow.Cast = 
+	{
+		base = "Base.Ability.Cast"
+		volume = -2.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_familiar_cast_01.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_cast_02.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_cast_03.vsnd",
+		]
+		vsnd_duration = 2.671293
+	}
+	Vindicta.Crow.Proj.Lp = 
+	{
+		base = "Base.Ability.Projectile"
+		volume = 0.0
+		volume_fade_in = 0.1
+		volume_fade_out = 0.2
+		delay_rand_min = -4.0
+		block_duration = 0.1
+		vsnd_files = "sounds/abilities/hornet/vindicta_familiar_proj_lp_01.vsnd"
+		vsnd_duration = 4.640907
+	}
+	Vindicta.Crow.Proj.Expire = 
+	{
+		base = "Base.Ability.Detached"
+		volume = -1.0
+		block_duration = 0.2
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_01.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_02.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_03.vsnd",
+		]
+		vsnd_duration = 1.447256
+	}
+	Vindicta.Crow.Hit = 
+	{
+		base = "Base.Ability.Hit"
+		volume = 0.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_familiar_hit_01.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_hit_02.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_hit_03.vsnd",
+		]
+		vsnd_duration = 1.732131
+	}
+	Vindicta.Crow.Debuff.Lp = 
+	{
+		base = "Base.Ability.StatusEffect"
+		volume = -8.0
+		volume_fade_in = 0.1
+		volume_fade_out = 0.5
+		delay_rand_min = -4.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_familiar_debuff_lp_01.vsnd"
+		instance_attenuator_enabled = 1.0
+		instance_count_offset_amount_db = 
+		[
+			[
+				1.0, 0.0, 0.0, -2.087491,
+				0.0, 0.0,
+			],
+			[
+				3.0, -4.0, -2.087491, 0.0,
+				0.0, 0.0,
+			],
+			[
+				6.0, -8.0, -2.087491, 0.0,
+				0.0, 0.0,
+			],
+		]
+		vsnd_duration = 5.053265
+	}
+	Vindicta.Crow.Debuff.End = 
+	{
+		base = "Base.Ability.StatusEffect"
+		volume = -6.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_01.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_02.vsnd",
+			"sounds/abilities/hornet/vindicta_familiar_proj_expire_03.vsnd",
+		]
+		vsnd_duration = 1.447256
+	}
+	Hornet.Assassinate.Zoom.In = 
+	{
+		base = "Base.Ability"
+		vsnd_files = "sounds/abilities/hornet/vindicta_assassinate_scope_in.vsnd"
+		vsnd_duration = 0.804694
+	}
+	Hornet.Assassinate.Zoom.Out = 
+	{
+		base = "Base.Ability"
+		volume = -3.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_assassinate_scope_out.vsnd"
+		vsnd_duration = 0.462902
+	}
+	Hornet.Assassinate.Zoom.Lp = 
+	{
+		base = "Base.Ability.Target.Beam"
+		volume = 6.0
+		vsnd_files = "sounds/abilities/hornet/vindicta_assassinate_scope_lp.vsnd"
+		vsnd_duration = 11.191497
+	}
+	Hornet.Assassinate.Cast = 
+	{
+		base = "Base.Ability.Ult.Cast"
+		volume = 0.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/vindicta_assassinate_fire_01.vsnd",
+			"sounds/abilities/hornet/vindicta_assassinate_fire_02.vsnd",
+			"sounds/abilities/hornet/vindicta_assassinate_fire_03.vsnd",
+			"sounds/abilities/hornet/vindicta_assassinate_fire_04.vsnd",
+			"sounds/abilities/hornet/vindicta_assassinate_fire_05.vsnd",
+		]
+		vsnd_duration = 3.002109
+	}
+	Hornet.Assassinate.Impact = 
+	{
+		base = "Base.Ability.Hit"
+		volume = 5.0
+		volume_offset_victim_db = 2.0
+		vsnd_files = 
+		[
+			"sounds/abilities/hornet/a4_assassinate/target_impact_pop_01.vsnd",
+			"sounds/abilities/hornet/a4_assassinate/target_impact_pop_02.vsnd",
+			"sounds/abilities/hornet/a4_assassinate/target_impact_pop_03.vsnd",
+			"sounds/abilities/hornet/a4_assassinate/target_impact_pop_04.vsnd",
+		]
+		vsnd_duration = 2.03932
+	}
+	Vindicta.Footstep = 
+	{
+		base = "Base.Footsteps.Soft"
+		track_1.vsnd_track_vol_offset_db = -7.0
+		vsnd_files = 
+		[
+			"sounds/player/footsteps/hornet/vindicta_footstep_01.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_02.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_03.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_04.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_05.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_06.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_07.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_08.vsnd",
+		]
+		vsnd_duration = 0.590068
+	}
+	Vindicta.Movement.Short = 
+	{
+		base = "Base.Movement"
+		volume = -5.0
+	}
+	Vindicta.Movement.Long = 
+	{
+		base = "Base.Movement"
+		volume = 0.0
+	}
+	Vindicta.JumpLand = 
+	{
+		base = "Base.Footsteps.JumpLand.Soft"
+		volume = -4.0
+		track_2.vsnd_track_vol_offset_db = -4.0
+		vsnd_files = 
+		[
+			"sounds/player/footsteps/hornet/vindicta_footstep_01.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_02.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_03.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_04.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_05.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_06.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_07.vsnd",
+			"sounds/player/footsteps/hornet/vindicta_footstep_08.vsnd",
+		]
+		track_2.track_vsnd_files = 
+		[
+			"sounds/player/movement/generic/foley_light/default_foley_01.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_02.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_03.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_04.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_05.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_06.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_07.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_08.vsnd",
+			"sounds/player/movement/generic/foley_light/default_foley_09.vsnd",
+		]
+		vsnd_duration = 0.590068
+	}
+	Vindicta.Mantle = 
+	{
+		base = "Base.Movement"
+	}
+	Vindicta.Melee.Swing = 
+	{
+		base = "Hero.Default.Melee.Swing"
+	}
+	Vindicta.Melee.Swing.Charged = 
+	{
+		base = "Hero.Default.Melee.Charged"
+	}
+	Hornet.Progession.Page.Win.VO = 
+	{
+		base = "Base.VO.HeroVictory"
+		context_name = "hero_hornet"
+		vsnd_files = 
+		[
+			"sounds/vo/hornet/hornet_select_09.vsnd",
+			"sounds/vo/hornet/hornet_upgrade_power1_06.vsnd",
+		]
+		vsnd_duration = 5.475555
+	}
+	Hornet.Progession.Page.Lose.VO = 
+	{
+		base = "Base.VO.HeroVictory"
+		context_name = "hero_hornet"
+		vsnd_files = 
+		[
+			"sounds/vo/hornet/hornet_unselect_03.vsnd",
+		]
+		vsnd_duration = 2.495193
+	}
+}
