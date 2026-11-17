@@ -5,21 +5,36 @@
 
   var ACTIVE_INTERVAL = 0.016;
   var IDLE_INTERVAL = 0.15;
-  var HERO_RECHECK_INTERVAL = 2.0;
   var DEBUG_LOG_INTERVAL = 1.0;
   var FLIGHT_COMPLETE_EPSILON = 0.001;
   var VINDICTA_HERO_NAME = "hornet";
-  var DEBUG = false;
+  var DEBUG = true;
+
+  var SCOPE_END_GRACE_MS = 50;
+  var LOCK_ARM_DELAY_MS = 150;
+  var FIRE_ENTER_PROGRESS = 0.95;
+  var FIRE_EXIT_PROGRESS = 0.90;
+  var FLIGHT_SEARCH_INTERVAL_MS = 250;
+  var FLIGHT_STALE_MS = 400;
+  var OWNER_TIMEOUT_MS = 500;
+  var EXCEPTION_LOG_INTERVAL_MS = 2000;
+  var OWNER_MARKER_ID = "VindictaHudOwner";
+  var SNIPE_ELEMENT_CLASSES = ["citadel_ability_hornet_snipe", "Citadel_ability_hornet_snipe", "snipe_power"];
+  var LEAP_ELEMENT_CLASSES = ["citadel_ability_hornet_leap", "Citadel_ability_hornet_leap", "leaping"];
+  var INSTANCE_CREATED_TIME = Date.now();
+  var INSTANCE_TOKEN = INSTANCE_CREATED_TIME.toString(36) + Math.floor(Math.random() * 1e9).toString(36);
 
 
   var g_schedulerId = null;
+  var g_isShutDown = false;
   var g_hudRoot = null;
   var g_chevronLeft = null;
   var g_chevronRight = null;
-  var g_meleeAbilityPanel = null;
-  var g_cachedHeroName = null;
-  var g_lastHeroRecheckTime = 0;
   var g_lastDebugLogTime = 0;
+  var g_lastDebugState = "";
+  var g_stage = "init";
+  var g_lastExceptionLogTime = 0;
+  var g_suppressedExceptions = 0;
 
   var g_progressElement = $.GetContextPanel();
   var g_circularProgress = null;
@@ -27,13 +42,9 @@
 
   var g_scopeImg = null;
 
-  var g_lastOpacity = -1.0;
-  var g_lastSnipeActiveState = false;
   var g_isNativeHidden = false;
-  var g_isMaskHidden = false;
 
   // Flickering and glow variables
-  var g_prevRawProgress = 0.0;
   var g_lastFlickerTime = 0;
   var g_cachedCrtShadow = "0px 0px 7.0px 1.0 #39FF14FF";
 
@@ -42,13 +53,25 @@
   var g_statusFire = null;
 
   // Compass variables
-  var g_compassViewport = null;
   var g_compassPanel = null;
   var g_minimapMainImage = null;
 
   // Left and right ladders
   var g_ladderLeft = null;
   var g_ladderRight = null;
+
+  // HUD ownership and per-scope session state
+  var g_ownerMarker = null;
+  var g_isOwner = false;
+  var g_session = {
+    active: false,
+    id: 0,
+    startTime: 0,
+    lastActiveTime: 0,
+    lastProgress: null,
+    armed: false,
+    firePhase: false
+  };
 
   var SNIPE_BASE_MAX_CHARGES = 2;
   var SNIPE_CHARGE_ICON_WIDTH = 42;
@@ -66,6 +89,7 @@
   var PULLUP_BEEP_SOUND = "Hornet.Assassinate.Jetsounds.PullUp2x";
   var g_snipeChargePanel = null;
   var g_snipeChargeIcons = [];
+  var g_snipeChargeImages = [];
   var g_snipeChargeTextures = [];
   var g_snipeMaxObserved = SNIPE_BASE_MAX_CHARGES;
   var g_snipeCurrentObserved = SNIPE_BASE_MAX_CHARGES;
@@ -75,87 +99,54 @@
   var g_snipeAbilityNameDiagnostic = "unknown";
   var g_lastSnipeAbilitySearchTime = 0;
   var g_snipeChargeSearchDiagnostic = "";
-  var g_scopeBeepScheduleId = null;
-  var g_scopeBeepLoopActive = false;
-  var g_scopeBeepEventName = null;
-  var g_scopeBeepInterval = 0.0;
-  var g_warningBeepScheduleId = null;
-  var g_warningBeepEventName = null;
-  var g_warningBeepInterval = 0.0;
+  var g_scopeChannel = { eventName: null, interval: 0, nextTime: 0, handles: [] };
+  var g_warningChannel = { eventName: null, interval: 0, nextTime: 0, handles: [] };
 
-  function PlayWarningBeepLoop() {
-    g_warningBeepScheduleId = null;
-    if (!ENABLE_SOUNDS || !g_warningBeepEventName || typeof PlayUISoundEvent !== "function") return;
-
-    try {
-      PlayUISoundEvent(g_warningBeepEventName);
-    } catch (e) {
-      g_warningBeepEventName = null;
-      g_warningBeepInterval = 0.0;
-      return;
-    }
-
-    g_warningBeepScheduleId = $.Schedule(g_warningBeepInterval, PlayWarningBeepLoop);
-  }
-
-  function SetWarningBeepLoop(eventName, interval) {
-    if (!ENABLE_SOUNDS || !eventName) {
-      g_warningBeepEventName = null;
-      g_warningBeepInterval = 0.0;
-      if (g_warningBeepScheduleId) {
-        $.CancelScheduled(g_warningBeepScheduleId);
-        g_warningBeepScheduleId = null;
+  function StopChannel(channel) {
+    if (typeof StopUISoundEvent === "function") {
+      for (var i = 0; i < channel.handles.length; i++) {
+        try { StopUISoundEvent(channel.handles[i]); } catch (e) {}
       }
-      return;
     }
-
-    if (g_warningBeepEventName === eventName && g_warningBeepInterval === interval) return;
-    if (g_warningBeepScheduleId) {
-      $.CancelScheduled(g_warningBeepScheduleId);
-      g_warningBeepScheduleId = null;
-    }
-    g_warningBeepEventName = eventName;
-    g_warningBeepInterval = interval;
-    PlayWarningBeepLoop();
+    channel.handles = [];
+    channel.eventName = null;
+    channel.interval = 0;
+    channel.nextTime = 0;
   }
 
-  function PlayScopeBeepLoop() {
-    g_scopeBeepScheduleId = null;
-    if (!ENABLE_SOUNDS || !g_scopeBeepLoopActive || !g_scopeBeepEventName || typeof PlayUISoundEvent !== "function") return;
-
-    try {
-      PlayUISoundEvent(g_scopeBeepEventName);
-    } catch (e) {
-      g_scopeBeepLoopActive = false;
-      g_scopeBeepEventName = null;
-      g_scopeBeepInterval = 0.0;
-      return;
-    }
-
-    g_scopeBeepScheduleId = $.Schedule(g_scopeBeepInterval, PlayScopeBeepLoop);
-  }
-
-  function SetScopeBeepLoop(eventName, interval) {
+  function SetChannel(channel, eventName, interval) {
     if (!ENABLE_SOUNDS || !eventName) {
-      g_scopeBeepLoopActive = false;
-      g_scopeBeepEventName = null;
-      g_scopeBeepInterval = 0.0;
-      if (g_scopeBeepScheduleId) {
-        $.CancelScheduled(g_scopeBeepScheduleId);
-        g_scopeBeepScheduleId = null;
-      }
+      eventName = null;
+      interval = 0;
+    }
+    if (channel.eventName === eventName && channel.interval === interval) return;
+    StopChannel(channel);
+    channel.eventName = eventName;
+    channel.interval = interval;
+  }
+
+  // Beeps are played from SyncLoop ticks instead of their own timers, so no sound can outlive the loop.
+  function ServiceChannel(channel, now) {
+    if (!channel.eventName || now < channel.nextTime || typeof PlayUISoundEvent !== "function") return;
+    var handle = null;
+    try {
+      handle = PlayUISoundEvent(channel.eventName);
+    } catch (e) {
+      StopChannel(channel);
       return;
     }
-
-    if (g_scopeBeepLoopActive && g_scopeBeepEventName === eventName && g_scopeBeepInterval === interval) return;
-    if (g_scopeBeepScheduleId) {
-      $.CancelScheduled(g_scopeBeepScheduleId);
-      g_scopeBeepScheduleId = null;
+    if (handle !== null && handle !== undefined) {
+      channel.handles.push(handle);
+      if (channel.handles.length > 3) channel.handles.shift();
     }
-    g_scopeBeepLoopActive = true;
-    g_scopeBeepEventName = eventName;
-    g_scopeBeepInterval = interval;
-    PlayScopeBeepLoop();
+    var intervalMs = Math.max(16, channel.interval * 1000);
+    channel.nextTime = channel.nextTime > 0 ? channel.nextTime + intervalMs : now + intervalMs;
+    if (channel.nextTime <= now) channel.nextTime = now + intervalMs;
+  }
+
+  function StopAllSounds() {
+    StopChannel(g_scopeChannel);
+    StopChannel(g_warningChannel);
   }
 
   function IsValidPanel(p) {
@@ -365,10 +356,10 @@
     }
   }
 
-  function LogSnipeChargeStatus(status) {
-    if (!DEBUG || status === g_lastSnipeChargeStatus) return;
-    g_lastSnipeChargeStatus = status;
-    $.Msg("[VindictaSnipeCharges] " + status);
+  function LogSnipeChargeStatus(key, detail) {
+    if (!DEBUG || key === g_lastSnipeChargeStatus) return;
+    g_lastSnipeChargeStatus = key;
+    $.Msg("[VindictaSnipeCharges] " + key + " " + detail);
   }
 
   function ReadCurrentSnipeCharges(panel, label) {
@@ -472,20 +463,24 @@
     }
   }
 
+  function ResetSnipeChargeIcons(panel) {
+    var children = IsValidPanel(panel) && panel.Children ? panel.Children() : [];
+    for (var i = 0; i < children.length; i++) {
+      if (IsValidPanel(children[i])) children[i].DeleteAsync(0);
+    }
+    g_snipeChargeIcons = [];
+    g_snipeChargeImages = [];
+    g_snipeChargeTextures = [];
+  }
+
   function GetOrCreateSnipeChargePanel(root) {
     if (IsValidPanel(g_snipeChargePanel)) return g_snipeChargePanel;
 
     var existing = root.FindChildTraverse("VindictaSnipeChargeStack");
     if (IsValidPanel(existing)) {
       g_snipeChargePanel = existing;
-      g_snipeChargeIcons = [];
-      g_snipeChargeTextures = [];
-      for (var i = 0; ; i++) {
-        var icon = existing.FindChildTraverse("VindictaSnipeCharge_" + i);
-        if (!IsValidPanel(icon)) break;
-        g_snipeChargeIcons.push(icon);
-        g_snipeChargeTextures.push(null);
-      }
+      // Rebuild instead of adopting icons, so no reference to a panel deleted elsewhere can survive.
+      ResetSnipeChargeIcons(existing);
       return g_snipeChargePanel;
     }
 
@@ -505,19 +500,13 @@
     panel.style.opacity = "1.0";
 
     g_snipeChargePanel = panel;
-    g_snipeChargeIcons = [];
-    g_snipeChargeTextures = [];
+    ResetSnipeChargeIcons(panel);
     return g_snipeChargePanel;
   }
 
-  function UpdateSnipeChargeIndicators(root) {
+  function UpdateSnipeChargeIndicators(root, showIndicators) {
     var panel = GetOrCreateSnipeChargePanel(root);
     var abilityPanel = FindSnipeAbilityPanel(root);
-    var isUltimateActive = false;
-    try {
-      isUltimateActive = IsValidPanel(abilityPanel) && abilityPanel.BHasClass("active");
-    } catch (e) {}
-    var showIndicators = isUltimateActive;
     var chargesLabel = IsValidPanel(abilityPanel) ? abilityPanel.FindChildTraverse("charges") : null;
     var reportedMaximum = IsValidPanel(abilityPanel) ? ReadMaximumSnipeCharges(abilityPanel) : null;
     var maximumCharges = reportedMaximum !== null ? Math.max(reportedMaximum, g_snipeHasObservedCurrent ? g_snipeCurrentObserved : 0) :
@@ -572,14 +561,26 @@
       chargeSource = "panel-not-found " + g_snipeChargeSearchDiagnostic;
     }
 
+    for (var v = 0; v < g_snipeChargeIcons.length; v++) {
+      if (!IsValidPanel(g_snipeChargeIcons[v]) || !IsValidPanel(g_snipeChargeImages[v])) {
+        ResetSnipeChargeIcons(panel);
+        break;
+      }
+    }
     while (g_snipeChargeIcons.length < maximumCharges) {
       var iconIndex = g_snipeChargeIcons.length;
       var icon = $.CreatePanel("Panel", panel, "VindictaSnipeCharge_" + iconIndex);
+      var iconImage = $.CreatePanel("Image", icon, "VindictaSnipeChargeImage_" + iconIndex);
+      try {
+        if (iconImage.SetScaling) iconImage.SetScaling("stretch-to-fit-preserve-aspect");
+      } catch (e) {}
       g_snipeChargeIcons.push(icon);
+      g_snipeChargeImages.push(iconImage);
       g_snipeChargeTextures.push(null);
     }
     while (g_snipeChargeIcons.length > maximumCharges) {
       var removedIcon = g_snipeChargeIcons.pop();
+      g_snipeChargeImages.pop();
       g_snipeChargeTextures.pop();
       if (IsValidPanel(removedIcon)) removedIcon.DeleteAsync(0);
     }
@@ -604,10 +605,7 @@
       chargeIcon.style.visibility = "visible";
       chargeIcon.style.opacity = showIndicators ? "1.0" : "0.0";
 
-      var chargeImage = chargeIcon.FindChildTraverse("VindictaSnipeChargeImage_" + i);
-      if (!IsValidPanel(chargeImage)) {
-        chargeImage = $.CreatePanel("Image", chargeIcon, "VindictaSnipeChargeImage_" + i);
-      }
+      var chargeImage = g_snipeChargeImages[i];
       var texture = i < currentCharges ? SNIPE_AVAILABLE_TEXTURE : SNIPE_SPENT_TEXTURE;
       if (g_snipeChargeTextures[i] !== texture) {
         chargeImage.SetImage(texture);
@@ -620,51 +618,15 @@
       chargeImage.style.visibility = "visible";
       chargeImage.style.washColor = "#00FF66";
       chargeImage.style.imgShadow = g_cachedCrtShadow;
-      try {
-        if (chargeImage.SetScaling) chargeImage.SetScaling("stretch-to-fit-preserve-aspect");
-      } catch (e) {}
     }
-    LogSnipeChargeStatus("source=" + chargeSource + " current=" + currentCharges + " max=" + maximumCharges +
-                         " currentSource=" + currentChargeSource +
-               " panel=" + (IsValidPanel(abilityPanel) ? abilityPanel.id : "missing") +
-               " ultClass=" + (isUltimateActive ? "active" : "inactive"));
+    LogSnipeChargeStatus("current=" + currentCharges + " max=" + maximumCharges +
+                         " panel=" + (IsValidPanel(abilityPanel) ? abilityPanel.id : "missing") +
+                         " shown=" + showIndicators,
+                         "source=" + chargeSource + " currentSource=" + currentChargeSource);
   }
 
   function HideSnipeChargeIndicators() {
     if (IsValidPanel(g_snipeChargePanel)) g_snipeChargePanel.style.opacity = "0.0";
-  }
-
-  function ExtractHeroFromId(id) {
-    if (typeof id !== "string") return null;
-    if (id.indexOf("citadel_ability_melee_") === 0) {
-      var partsLong = id.split("_");
-      if (partsLong.length >= 5 && partsLong[4] === "melee") return partsLong[3];
-    } else if (id.indexOf("ability_melee_") === 0) {
-      var partsShort = id.split("_");
-      if (partsShort.length >= 4 && partsShort[3] === "melee") return partsShort[2];
-    }
-    return null;
-  }
-
-  function FindMeleeAbilityPanel(root) {
-    var found = null;
-    function Search(panel, depth) {
-      if (found || !panel || depth > 20) return;
-      var id = "";
-      try { id = panel.id || ""; } catch (e) {}
-
-      if (ExtractHeroFromId(id)) {
-        found = panel;
-        return;
-      }
-      var kids = panel.Children ? panel.Children() : [];
-      for (var i = 0; i < kids.length; i++) {
-        Search(kids[i], depth + 1);
-        if (found) return;
-      }
-    }
-    Search(root, 0);
-    return found;
   }
 
   function GetMinimapYaw(root) {
@@ -704,39 +666,72 @@
     }
   }
 
-  var g_flightProgressPanel = null;
+  var g_flightElement = null;
   var g_flightClippedLabel = null;
-  var g_lastFlightPanelSearchTime = 0;
+  var g_flightSearchRoot = null;
+  var g_lastFlightSearchTime = 0;
+  var g_flightLastRatio = null;
+  var g_flightLastChangeTime = 0;
 
-  function FindFlightDurationPanel(root) {
-    if (IsValidPanel(g_flightProgressPanel) && IsValidPanel(g_flightClippedLabel)) return g_flightProgressPanel;
-
-    var now = Date.now();
-    if ((now - g_lastFlightPanelSearchTime) < 500) return null;
-    g_lastFlightPanelSearchTime = now;
-
-    var gameplayHud = root.FindChildTraverse("gameplay_hud");
-    var crosshair = IsValidPanel(gameplayHud) ? gameplayHud.FindChildTraverse("crosshair") : null;
-    var progressPanel = IsValidPanel(crosshair) ? crosshair.FindChildTraverse("progress") : null;
-    var clippedLabel = IsValidPanel(progressPanel) ? progressPanel.FindChildTraverse("ability_name_clipped") : null;
-    if (!IsValidPanel(clippedLabel)) return null;
-
-    g_flightProgressPanel = progressPanel;
-    g_flightClippedLabel = clippedLabel;
-    return progressPanel;
+  function IsLeapElement(panel) {
+    for (var i = 0; i < LEAP_ELEMENT_CLASSES.length; i++) {
+      if (HasPanelClass(panel, LEAP_ELEMENT_CLASSES[i])) return true;
+    }
+    return false;
   }
 
-  function IsFlightProgressLeaping(panel) {
-    return HasPanelClass(panel, "leaping") ||
-           HasPanelClass(panel, "Citadel_ability_hornet_leap") ||
-           HasPanelClass(panel, "citadel_ability_hornet_leap");
+  function ResetFlightTracking() {
+    g_flightLastRatio = null;
+    g_flightLastChangeTime = 0;
   }
 
-  function ReadFlightDurationProgress(flightPanel) {
+  function ResetFlightLookup() {
+    g_flightElement = null;
+    g_flightClippedLabel = null;
+    g_lastFlightSearchTime = 0;
+    ResetFlightTracking();
+  }
+
+  // Ability elements all share the id "progress", so the leap element is matched by class instead.
+  function FindFlightDurationLabel(root, now) {
+    if (IsValidPanel(g_flightClippedLabel) && IsLeapElement(g_flightElement)) return g_flightClippedLabel;
+    if (g_flightClippedLabel) LogDebug("flight element lost");
+    g_flightElement = null;
+    g_flightClippedLabel = null;
+    if ((now - g_lastFlightSearchTime) < FLIGHT_SEARCH_INTERVAL_MS) return null;
+    g_lastFlightSearchTime = now;
+
+    if (!IsValidPanel(g_flightSearchRoot)) {
+      var gameplayHud = root.FindChildTraverse("gameplay_hud");
+      var crosshair = IsValidPanel(gameplayHud) ? gameplayHud.FindChildTraverse("crosshair") : null;
+      g_flightSearchRoot = IsValidPanel(crosshair) ? crosshair : gameplayHud;
+    }
+    if (!IsValidPanel(g_flightSearchRoot)) return null;
+
+    var pending = [g_flightSearchRoot];
+    for (var visited = 0; pending.length > 0 && visited < 3000; visited++) {
+      var panel = pending.pop();
+      if (!IsValidPanel(panel)) continue;
+      if (IsLeapElement(panel)) {
+        var label = panel.FindChildTraverse("ability_name_clipped");
+        if (IsValidPanel(label)) {
+          g_flightElement = panel;
+          g_flightClippedLabel = label;
+          ResetFlightTracking();
+          LogDebug("flight element found id=" + panel.id);
+          return label;
+        }
+      }
+      var children = panel.Children ? panel.Children() : [];
+      for (var c = 0; c < children.length; c++) pending.push(children[c]);
+    }
+    return null;
+  }
+
+  function ReadFlightDurationProgress(clippedLabel) {
     try {
-      var clippedLabel = flightPanel === g_flightProgressPanel ? g_flightClippedLabel : null;
       if (IsValidPanel(clippedLabel) && clippedLabel.style && clippedLabel.style.clip) {
-        var matches = clippedLabel.style.clip.match(/(\d+(?:\.\d+)?)%/g);
+        var matches = String(clippedLabel.style.clip).match(/(\d+(?:\.\d+)?)%/g);
         if (matches && matches.length >= 2) {
           var elapsedPercent = parseFloat(matches[1]);
           if (!isNaN(elapsedPercent)) {
@@ -913,11 +908,11 @@
           this.warningStartTime = now;
 
           if (warningMode === "altitude") {
-            SetWarningBeepLoop(ALTITUDE_BEEP_SOUND, ALTITUDE_BEEP_INTERVAL);
+            SetChannel(g_warningChannel, ALTITUDE_BEEP_SOUND, ALTITUDE_BEEP_INTERVAL);
           } else if (warningMode === "pullup") {
-            SetWarningBeepLoop(PULLUP_BEEP_SOUND, PULLUP_BEEP_INTERVAL);
+            SetChannel(g_warningChannel, PULLUP_BEEP_SOUND, PULLUP_BEEP_INTERVAL);
           } else {
-            SetWarningBeepLoop(null, 0.0);
+            SetChannel(g_warningChannel, null, 0.0);
           }
         }
 
@@ -948,23 +943,22 @@
       }
       if (IsValidPanel(this.altImage)) this.altImage.style.opacity = "0.0";
       if (IsValidPanel(this.pullUpImage)) this.pullUpImage.style.opacity = "0.0";
-      SetWarningBeepLoop(null, 0.0);
+      this.ResetWarning();
+    },
+
+    ResetWarning: function () {
+      StopChannel(g_warningChannel);
       this.warningMode = null;
       this.warningStartTime = 0;
     },
 
-    Destroy: function () {
-      if (IsValidPanel(this.container)) {
-        this.container.DeleteAsync(0);
-      }
+    DropRefs: function () {
       this.container = null;
       this.boxImage = null;
       this.altImage = null;
       this.pullUpImage = null;
       this.strips = [];
-      SetWarningBeepLoop(null, 0.0);
-      this.warningMode = null;
-      this.warningStartTime = 0;
+      this.ResetWarning();
     }
   };
 
@@ -1000,69 +994,39 @@
     return g_compassPanel;
   }
 
+  function CreateOverlayImage(parent, id, texture, width, height, transform) {
+    var image = $.CreatePanel("Image", parent, id);
+    image.SetImage(texture);
+    image.style.horizontalAlign = "center";
+    image.style.verticalAlign = "center";
+    if (transform) image.style.transform = transform;
+    image.style.width = width;
+    image.style.height = height;
+    image.style.opacity = "0.0";
+    return image;
+  }
+
+  // Each panel is resolved on its own so a half-missing pair never spawns duplicates.
+  function FindOrCreateOverlayImage(parent, id, texture, width, height, transform) {
+    var existing = parent.FindChildTraverse(id);
+    return IsValidPanel(existing) ? existing : CreateOverlayImage(parent, id, texture, width, height, transform);
+  }
+
   function GetOrCreateLadderPanels(root) {
-    if (IsValidPanel(g_ladderLeft) && IsValidPanel(g_ladderRight)) {
-      return { left: g_ladderLeft, right: g_ladderRight };
+    var texture = "s2r://panorama/images/hud/crosshair/ladder_psd.vtex";
+    if (!IsValidPanel(g_ladderLeft)) {
+      g_ladderLeft = FindOrCreateOverlayImage(root, "VindictaLadderLeft", texture, "76px", "1344px", "translateX(-30%)");
+      g_ladderLeft.style.overflow = "noclip";
     }
-
-    var existingLeft = root.FindChildTraverse("VindictaLadderLeft");
-    var existingRight = root.FindChildTraverse("VindictaLadderRight");
-    
-    if (existingLeft && existingRight) {
-      g_ladderLeft = existingLeft;
-      g_ladderRight = existingRight;
-      return { left: g_ladderLeft, right: g_ladderRight };
+    if (!IsValidPanel(g_ladderRight)) {
+      g_ladderRight = FindOrCreateOverlayImage(root, "VindictaLadderRight", texture, "76px", "1344px", "translateX(30%)");
+      g_ladderRight.style.overflow = "noclip";
     }
-
-    var leftPanel = $.CreatePanel("Image", root, "VindictaLadderLeft");
-    leftPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
-    leftPanel.style.horizontalAlign = "center";
-    leftPanel.style.verticalAlign = "center";
-    leftPanel.style.transform = "translateX(-30%)";
-    leftPanel.style.width = "76px";
-    leftPanel.style.height = "1344px";
-    leftPanel.style.opacity = "0.0";
-    leftPanel.style.overflow = "noclip";
-
-    var rightPanel = $.CreatePanel("Image", root, "VindictaLadderRight");
-    rightPanel.SetImage("s2r://panorama/images/hud/crosshair/ladder_psd.vtex");
-    rightPanel.style.horizontalAlign = "center";
-    rightPanel.style.verticalAlign = "center";
-    rightPanel.style.transform = "translateX(30%)";
-    rightPanel.style.width = "76px";
-    rightPanel.style.height = "1344px";
-    rightPanel.style.opacity = "0.0";
-    rightPanel.style.overflow = "noclip";
-
-    g_ladderLeft = leftPanel;
-    g_ladderRight = rightPanel;
     return { left: g_ladderLeft, right: g_ladderRight };
   }
 
-  function ForceRedetectHero(root) {
-    var panel = FindMeleeAbilityPanel(root);
-    g_meleeAbilityPanel = panel;
-    g_cachedHeroName = panel ? ExtractHeroFromId(panel.id || "") : null;
-    return g_cachedHeroName;
-  }
-
-  function DetectCurrentHero(root) {
-    var now = Date.now() / 1000.0;
-    var dueForRecheck = (now - g_lastHeroRecheckTime) >= HERO_RECHECK_INTERVAL;
-    if (dueForRecheck) {
-      g_lastHeroRecheckTime = now;
-      return ForceRedetectHero(root);
-    }
-    if (IsValidPanel(g_meleeAbilityPanel)) {
-      var hero = ExtractHeroFromId(g_meleeAbilityPanel.id || "");
-      if (hero) return hero;
-    }
-    return ForceRedetectHero(root);
-  }
-
   function GetLocalProgressPanels() {
-    if (IsValidPanel(g_circularProgress)) return { progress: g_circularProgress, backer: g_circularProgressBacker };
-    if (IsValidPanel(g_progressElement)) {
+    if (!IsValidPanel(g_circularProgress) || !IsValidPanel(g_circularProgressBacker)) {
       g_circularProgress = g_progressElement.FindChildInLayoutFile("circular_progress");
       g_circularProgressBacker = g_progressElement.FindChildInLayoutFile("circular_progress_backer");
     }
@@ -1075,49 +1039,32 @@
     return g_scopeImg;
   }
 
+  // Returns null when unreadable so callers hold the last value instead of snapping to zero.
   function ReadProgressValue(localProgress) {
-    if (localProgress.value !== undefined) return { value: localProgress.value, source: "value" };
-    if (localProgress.progress !== undefined) return { value: localProgress.progress, source: "progress" };
-    if (localProgress.style && localProgress.style.clip) {
-      var matches = localProgress.style.clip.match(/(\d+(\.\d+)?)deg/g);
-      if (matches && matches.length > 0) {
-        var endAngleDeg = parseFloat(matches[matches.length - 1]);
-        return { value: endAngleDeg / 360.0, source: "clip:" + localProgress.style.clip };
+    try {
+      if (typeof localProgress.value === "number" && !isNaN(localProgress.value)) return localProgress.value;
+      if (typeof localProgress.progress === "number" && !isNaN(localProgress.progress)) return localProgress.progress;
+      var clip = localProgress.style ? localProgress.style.clip : null;
+      if (clip) {
+        var matches = String(clip).match(/(\d+(\.\d+)?)deg/g);
+        if (matches && matches.length > 0) {
+          var endAngleDeg = parseFloat(matches[matches.length - 1]);
+          if (!isNaN(endAngleDeg)) return endAngleDeg / 360.0;
+        }
       }
-    }
-    return { value: 0.0, source: "fallback-zero" };
+    } catch (e) {}
+    return null;
   }
 
   function GetOrCreateChevronPanels(scopeImg) {
-    if (IsValidPanel(g_chevronLeft) && IsValidPanel(g_chevronRight)) {
-      return { left: g_chevronLeft, right: g_chevronRight };
+    if (!IsValidPanel(g_chevronLeft)) {
+      g_chevronLeft = FindOrCreateOverlayImage(scopeImg, "VindictaChevronLeft",
+        "s2r://panorama/images/hud/crosshair/chevron_left_psd.vtex", "128px", "128px", null);
     }
-    var existingLeft = scopeImg.FindChildTraverse("VindictaChevronLeft");
-    var existingRight = scopeImg.FindChildTraverse("VindictaChevronRight");
-    if (existingLeft && existingRight) {
-      g_chevronLeft = existingLeft;
-      g_chevronRight = existingRight;
-      return { left: g_chevronLeft, right: g_chevronRight };
+    if (!IsValidPanel(g_chevronRight)) {
+      g_chevronRight = FindOrCreateOverlayImage(scopeImg, "VindictaChevronRight",
+        "s2r://panorama/images/hud/crosshair/chevron_right_psd.vtex", "128px", "128px", null);
     }
-
-    var left = $.CreatePanel("Image", scopeImg, "VindictaChevronLeft");
-    left.SetImage("s2r://panorama/images/hud/crosshair/chevron_left_psd.vtex");
-    left.style.horizontalAlign = "center";
-    left.style.verticalAlign = "center";
-    left.style.width = "128px";
-    left.style.height = "128px";
-    left.style.opacity = "0.0";
-
-    var right = $.CreatePanel("Image", scopeImg, "VindictaChevronRight");
-    right.SetImage("s2r://panorama/images/hud/crosshair/chevron_right_psd.vtex");
-    right.style.horizontalAlign = "center";
-    right.style.verticalAlign = "center";
-    right.style.width = "128px";
-    right.style.height = "128px";
-    right.style.opacity = "0.0";
-
-    g_chevronLeft = left;
-    g_chevronRight = right;
     return { left: g_chevronLeft, right: g_chevronRight };
   }
 
@@ -1150,323 +1097,477 @@
   }
 
   function GetOrCreateStatusPanels(scopeImg) {
-    if (IsValidPanel(g_statusLock) && IsValidPanel(g_statusFire)) {
-      return { lock: g_statusLock, fire: g_statusFire };
+    if (!IsValidPanel(g_statusLock)) {
+      g_statusLock = FindOrCreateOverlayImage(scopeImg, "VindictaStatusLock",
+        "s2r://panorama/images/hud/crosshair/lock_psd.vtex", "64px", "32px", "translateY(50px)");
     }
-
-    var existingLock = scopeImg.FindChildTraverse("VindictaStatusLock");
-    var existingFire = scopeImg.FindChildTraverse("VindictaStatusFire");
-    if (existingLock && existingFire) {
-      g_statusLock = existingLock;
-      g_statusFire = existingFire;
-      return { lock: g_statusLock, fire: g_statusFire };
+    if (!IsValidPanel(g_statusFire)) {
+      g_statusFire = FindOrCreateOverlayImage(scopeImg, "VindictaStatusFire",
+        "s2r://panorama/images/hud/crosshair/fire_psd.vtex", "64px", "32px", "translateY(50px)");
     }
-
-    var lockPanel = $.CreatePanel("Image", scopeImg, "VindictaStatusLock");
-    lockPanel.SetImage("s2r://panorama/images/hud/crosshair/lock_psd.vtex");
-    lockPanel.style.horizontalAlign = "center";
-    lockPanel.style.verticalAlign = "center";
-    lockPanel.style.transform = "translateY(50px)";
-    lockPanel.style.width = "64px";
-    lockPanel.style.height = "32px";
-    lockPanel.style.opacity = "0.0";
-
-    var firePanel = $.CreatePanel("Image", scopeImg, "VindictaStatusFire");
-    firePanel.SetImage("s2r://panorama/images/hud/crosshair/fire_psd.vtex");
-    firePanel.style.horizontalAlign = "center";
-    firePanel.style.verticalAlign = "center";
-    firePanel.style.transform = "translateY(50px)";
-    firePanel.style.width = "64px";
-    firePanel.style.height = "32px";
-    firePanel.style.opacity = "0.0";
-
-    g_statusLock = lockPanel;
-    g_statusFire = firePanel;
     return { lock: g_statusLock, fire: g_statusFire };
   }
 
-  function MaybeLogDebug(hero, progressInfo, scopeImgFound, localProgressFound, root) {
-    if (!DEBUG) return;
-    var now = Date.now() / 1000.0;
-    if ((now - g_lastDebugLogTime) < DEBUG_LOG_INTERVAL) return;
-    g_lastDebugLogTime = now;
-    $.Msg(
-      "[VindictaMask] root=" + (root ? "found" : "NULL") +
-      " hero=" + (hero || "NULL") +
-      " local_progress=" + (localProgressFound ? "found" : "NULL") +
-      " scope_img=" + (scopeImgFound ? "found" : "NULL") +
-      " progress=" + (progressInfo ? progressInfo.value.toFixed(3) : "N/A")
-    );
+  function LogDebug(message) {
+    if (DEBUG) $.Msg("[VindictaMask " + INSTANCE_TOKEN + "] " + message);
   }
 
-  function SyncLoop() {
-    var nextInterval = IDLE_INTERVAL;
+  function ReportException(e) {
+    var now = Date.now();
+    if ((now - g_lastExceptionLogTime) < EXCEPTION_LOG_INTERVAL_MS) {
+      g_suppressedExceptions++;
+      return;
+    }
+    $.Msg("[VindictaMask] EXCEPTION in " + g_stage + ": " + e +
+          (g_suppressedExceptions > 0 ? " (" + g_suppressedExceptions + " repeats suppressed)" : ""));
+    g_lastExceptionLogTime = now;
+    g_suppressedExceptions = 0;
+  }
+
+  function DescribeElementClasses() {
+    var names = SNIPE_ELEMENT_CLASSES.concat(["hero_" + VINDICTA_HERO_NAME, "ability_element_progress"]);
+    var present = [];
+    for (var i = 0; i < names.length; i++) {
+      if (HasPanelClass(g_progressElement, names[i])) present.push(names[i]);
+    }
+    return present.length > 0 ? present.join(",") : "none";
+  }
+
+  // 17 abilities share this layout, so each script copy checks that its own element is Vindicta's Snipe.
+  function GetElementStrength() {
+    for (var i = 0; i < SNIPE_ELEMENT_CLASSES.length; i++) {
+      if (HasPanelClass(g_progressElement, SNIPE_ELEMENT_CLASSES[i])) return 3;
+    }
+    var heroClass = "hero_" + VINDICTA_HERO_NAME;
+    if (HasPanelClass(g_progressElement, heroClass)) return 2;
+    var ancestor = g_progressElement.GetParent();
+    for (var depth = 0; IsValidPanel(ancestor) && depth < 24; depth++) {
+      if (HasPanelClass(ancestor, heroClass)) return 1;
+      if (ancestor.id === "CitadelHudRoot") break;
+      ancestor = ancestor.GetParent();
+    }
+    return 0;
+  }
+
+  function GetOwnerMarker(root) {
+    if (IsValidPanel(g_ownerMarker)) return g_ownerMarker;
+    var marker = root.FindChildTraverse(OWNER_MARKER_ID);
+    if (!IsValidPanel(marker)) {
+      marker = $.CreatePanel("Label", root, OWNER_MARKER_ID);
+      marker.text = "";
+      marker.hittest = false;
+      marker.visible = false;
+    }
+    g_ownerMarker = marker;
+    return marker;
+  }
+
+  function ReadOwnerClaim(marker) {
+    var parts = String(marker.text || "").split("|");
+    if (parts.length !== 4) return null;
+    return {
+      token: parts[0],
+      strength: parseInt(parts[1], 10) || 0,
+      heartbeat: parseFloat(parts[2]) || 0,
+      created: parseFloat(parts[3]) || 0
+    };
+  }
+
+  // Script copies share no memory, so the claim lives on a hidden label under the HUD root.
+  function ClaimOwnership(root, strength, now) {
+    var marker = GetOwnerMarker(root);
+    var claim = ReadOwnerClaim(marker);
+    var isMine = claim !== null && claim.token === INSTANCE_TOKEN;
+    var claimAlive = claim !== null && (now - claim.heartbeat) < OWNER_TIMEOUT_MS;
+    if (claimAlive && !isMine) {
+      var outranks = strength > claim.strength ||
+                     (strength === claim.strength && INSTANCE_CREATED_TIME > claim.created);
+      if (!outranks) return false;
+    }
+    if (isMine && claimAlive && claim.strength === strength && (now - claim.heartbeat) < OWNER_TIMEOUT_MS / 4) {
+      return true;
+    }
+    marker.text = INSTANCE_TOKEN + "|" + strength + "|" + now + "|" + INSTANCE_CREATED_TIME;
+    return true;
+  }
+
+  function ReleaseOwnership() {
     try {
-      if (IsValidPanel(g_progressElement)) {
-        var root = GetHudRoot();
-        if (root) {
-          var hero = DetectCurrentHero(root);
-          if (hero === VINDICTA_HERO_NAME) {
-            var isSnipeActive = IsSnipeAbilityActive(root);
-            UpdateSnipeChargeIndicators(root);
-            var panels = GetLocalProgressPanels();
-            if (panels.progress) {
-              var progressInfo = ReadProgressValue(panels.progress);
-              
-              var rawVal = progressInfo.value;
-              var nextOpacity = (typeof rawVal === "number" && !isNaN(rawVal)) ? rawVal : 0.0;
-
-              if (!isSnipeActive) {
-                var rogueCompass = root.FindChildTraverse("VindictaCompassTape");
-                if (rogueCompass) {
-                  rogueCompass.DeleteAsync(0);
-                }
-                if (typeof g_compassPanel !== 'undefined' && g_compassPanel !== null) {
-                  g_compassPanel = null;
-                }
-              }
-
-              HideNativeProgress(panels.progress, panels.backer);
-
-              var scopeImg = GetScopeImg(root);
-              if (scopeImg) {
-                var chevrons = GetOrCreateChevronPanels(scopeImg);
-                var statusText = GetOrCreateStatusPanels(scopeImg);
-                var ladders = GetOrCreateLadderPanels(root);
-                
-                var isClimbing = nextOpacity >= g_prevRawProgress;
-                g_prevRawProgress = nextOpacity;
-
-                if (isSnipeActive) nextInterval = ACTIVE_INTERVAL;
-
-                var now = Date.now();
-                if (!g_lastFlickerTime || (now - g_lastFlickerTime) > 30) {
-                  g_lastFlickerTime = now;
-                  var baseBlur = 7.0;
-                  var blurJitter = (Math.random() * 1.6) - 0.8;
-                  var currentBlur = (baseBlur + blurJitter).toFixed(1);
-                  var flickerAlpha = (Math.random() > 0.88) ? "E6" : "FF"; 
-                  g_cachedCrtShadow = "0px 0px " + currentBlur + "px 1.0 #39FF14" + flickerAlpha;
-                }
-
-                var progressChanged = Math.abs(g_lastOpacity - nextOpacity) > 0.002;
-                if (progressChanged || g_lastSnipeActiveState !== isSnipeActive || isSnipeActive) {
-                  var MAX_PIXEL_OFFSET = 180;
-                  
-                  var normalizedProgress = isClimbing ? (1.0 - nextOpacity) : nextOpacity;
-                  var currentOffset = MAX_PIXEL_OFFSET * normalizedProgress;
-
-                  if (isSnipeActive) {
-                    var compass = GetOrCreateCompassPanel(root);
-                    
-                    var currentYaw = GetMinimapYaw(root) + 90.0; 
-                    if (currentYaw > 180) currentYaw -= 360;
-                    if (currentYaw < -180) currentYaw += 360;
-
-                    var TOTAL_DEGREES = 720; 
-                    var IMAGE_WIDTH_PX = 4872;
-                    var PX_PER_DEGREE = IMAGE_WIDTH_PX / TOTAL_DEGREES;
-
-                    var compassOffsetPx = currentYaw * PX_PER_DEGREE;
-
-                    var panelWidth = compass.actuallayoutwidth;
-                    if (!panelWidth || panelWidth <= 0) panelWidth = 1075;
-
-                    var centerBaseX = (panelWidth / 2.0) - (4872.0 / 2.0);
-                    var finalBgX = centerBaseX - compassOffsetPx;
-
-                    compass.style.washColor = "#00FF66";
-                    compass.visible = true;
-                    compass.style.visibility = "visible";
-                    compass.style.opacity = "1.0";
-                    
-                    compass.style.backgroundPosition = finalBgX.toFixed(1) + "px 0px";
-
-                    scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
-                    scopeImg.style.washColor = "#00FF66";
-                    scopeImg.style.imgShadow = g_cachedCrtShadow;
-
-                    chevrons.left.style.washColor = "#00FF66";
-                    chevrons.right.style.washColor = "#00FF66";
-                    chevrons.left.style.imgShadow = g_cachedCrtShadow;
-                    chevrons.right.style.imgShadow = g_cachedCrtShadow;
-                    chevrons.left.style.opacity = "1.0";
-                    chevrons.right.style.opacity = "1.0";
-                    chevrons.left.style.transform = "translateX(" + (-currentOffset) + "px)";
-                    chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
-
-                    ladders.left.style.washColor = "#00FF66";
-                    ladders.right.style.washColor = "#00FF66";
-                    ladders.left.style.imgShadow = g_cachedCrtShadow;
-                    ladders.right.style.imgShadow = g_cachedCrtShadow;
-                    
-                    ladders.left.visible = true;
-                    ladders.right.visible = true;
-                    ladders.left.style.visibility = "visible";
-                    ladders.right.style.visibility = "visible";
-                    
-                    ladders.left.style.opacity = "1.0";
-                    ladders.right.style.opacity = "1.0";
-
-                    var timeSec = now / 1000.0;
-                    var driftY = (Math.sin(timeSec * 0.7) * 70) + (Math.cos(timeSec * 0.35) * 50);
-                    
-                    ladders.left.style.transform = "translateX(-30%) translateY(" + driftY.toFixed(1) + "px)";
-                    ladders.right.style.transform = "translateX(30%) translateY(" + driftY.toFixed(1) + "px)";
-
-                    var isFullyLocked = normalizedProgress <= 0.05;
-
-                    SetScopeBeepLoop(
-                      isFullyLocked ? SCOPE_FIRE_SOUND : SCOPE_LOCK_SOUND,
-                      isFullyLocked ? FIRE_BEEP_INTERVAL : SCOPE_BEEP_INTERVAL
-                    );
-                    
-                    if (!isFullyLocked) {
-                      var lockFlashOn = (now % 350) < 175;
-                      statusText.lock.style.washColor = "#00FF66";
-                      statusText.lock.style.imgShadow = g_cachedCrtShadow;
-                      statusText.lock.style.opacity = lockFlashOn ? "1.0" : "0.0";
-                      statusText.fire.style.opacity = "0.0";
-                    } else {
-                      var fireFlashOn = (now % 250) < 125;
-                      statusText.fire.style.washColor = "#00FF66";
-                      statusText.fire.style.imgShadow = g_cachedCrtShadow;
-                      statusText.fire.style.opacity = fireFlashOn ? "1.0" : "0.0";
-                      statusText.lock.style.opacity = "0.0";
-                    }
-
-                    // --- DYNAMIC FLIGHT DURATION READOUT (9999 -> 0000) ---
-                    g_altimeterDisplay.GetOrCreate(root);
-
-                    var flightPanel = FindFlightDurationPanel(root);
-                    var progressRatio = ReadFlightDurationProgress(flightPanel);
-                    var isFlying = progressRatio !== null && progressRatio > 0.0 && progressRatio < 1.0;
-                    var flightValue = 0;
-
-                    if (isFlying) {
-                      var remainingRatio = 1.0 - progressRatio;
-                      flightValue = Math.floor(remainingRatio * 9999);
-                    } else {
-                      flightValue = 0;
-                    }
-
-                    g_altimeterDisplay.Update(flightValue, g_cachedCrtShadow);
-
-                  } else {
-                    SetScopeBeepLoop(null, 0.0);
-                    if (IsValidPanel(g_compassPanel)) {
-                      g_compassPanel.DeleteAsync(0);
-                      g_compassPanel = null;
-                    }
-
-                    g_altimeterDisplay.Hide();
-                    
-                    scopeImg.style.backgroundImage = null;
-                    scopeImg.style.washColor = null;
-                    scopeImg.style.imgShadow = null;
-                    chevrons.left.style.opacity = "0.0";
-                    chevrons.right.style.opacity = "0.0";
-                    if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
-                    if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
-                    if (IsValidPanel(g_ladderLeft)) g_ladderLeft.style.opacity = "0.0";
-                    if (IsValidPanel(g_ladderRight)) g_ladderRight.style.opacity = "0.0";
-                  }
-
-                  g_lastOpacity = nextOpacity;
-                  g_lastSnipeActiveState = isSnipeActive;
-                  g_isMaskHidden = !isSnipeActive;
-                }
-              }
-
-              //MaybeLogDebug(hero, progressInfo, !!scopeImg, true, root);
-            } else {
-              SetScopeBeepLoop(null, 0.0);
-              //MaybeLogDebug(hero, { value: 0, source: "no-progress" }, false, false, root);
-            }
-          } else {
-            SetScopeBeepLoop(null, 0.0);
-            LogSnipeChargeStatus("Vindicta hero not detected: " + (hero || "none"));
-            HideSnipeChargeIndicators();
-            if (IsValidPanel(g_scopeImg)) {
-              g_scopeImg.style.backgroundImage = null;
-              g_scopeImg.style.washColor = null;
-              g_scopeImg.style.imgShadow = null;
-            }
-            
-            g_altimeterDisplay.Destroy();
-
-            var strayCompass = root.FindChildTraverse("VindictaCompassTape");
-            if (strayCompass) {
-              strayCompass.DeleteAsync(0);
-            }
-            if (IsValidPanel(g_compassPanel)) {
-              g_compassPanel.DeleteAsync(0);
-              g_compassPanel = null;
-            }
-            
-            if (!g_isMaskHidden) {
-              if (IsValidPanel(g_chevronLeft)) g_chevronLeft.style.opacity = "0.0";
-              if (IsValidPanel(g_chevronRight)) g_chevronRight.style.opacity = "0.0";
-              if (IsValidPanel(g_statusLock)) g_statusLock.style.opacity = "0.0";
-              if (IsValidPanel(g_statusFire)) g_statusFire.style.opacity = "0.0";
-              if (IsValidPanel(g_ladderLeft)) g_ladderLeft.style.opacity = "0.0";
-              if (IsValidPanel(g_ladderRight)) g_ladderRight.style.opacity = "0.0";
-              
-              g_isMaskHidden = true;
-              g_lastOpacity = 0.0;
-              g_lastSnipeActiveState = false;
-            }
-            var localPanels = GetLocalProgressPanels();
-            if (localPanels.progress) {
-              RestoreNativeProgress(localPanels.progress, localPanels.backer);
-            }
-          }
-        }
+      if (IsValidPanel(g_ownerMarker)) {
+        var claim = ReadOwnerClaim(g_ownerMarker);
+        if (claim && claim.token === INSTANCE_TOKEN) g_ownerMarker.text = "";
       }
-    } catch (e) {
-      $.Msg("[VindictaMask] EXCEPTION: " + e);
-    }
-    g_schedulerId = $.Schedule(nextInterval, SyncLoop);
+    } catch (e) {}
+    g_isOwner = false;
   }
 
-  function Cleanup() {
-    if (g_schedulerId) {
-      $.CancelScheduled(g_schedulerId);
-      g_schedulerId = null;
-    }
-
-    g_altimeterDisplay.Destroy();
-
-    if (IsValidPanel(g_chevronLeft)) g_chevronLeft.DeleteAsync(0);
-    if (IsValidPanel(g_chevronRight)) g_chevronRight.DeleteAsync(0);
-    if (IsValidPanel(g_statusLock)) g_statusLock.DeleteAsync(0);
-    if (IsValidPanel(g_statusFire)) g_statusFire.DeleteAsync(0);
-    if (IsValidPanel(g_compassViewport)) g_compassViewport.DeleteAsync(0);
-    if (IsValidPanel(g_compassPanel)) g_compassPanel.DeleteAsync(0);
-    
+  function DropScopeCaches() {
+    g_scopeImg = null;
     g_chevronLeft = null;
     g_chevronRight = null;
     g_statusLock = null;
     g_statusFire = null;
-    g_compassViewport = null;
-    g_compassPanel = null;
+  }
+
+  function DropPanelCaches() {
+    DropScopeCaches();
     g_hudRoot = null;
-    g_meleeAbilityPanel = null;
-    g_scopeImg = null;
+    g_ladderLeft = null;
+    g_ladderRight = null;
+    g_compassPanel = null;
+    g_minimapMainImage = null;
+    g_ownerMarker = null;
     g_circularProgress = null;
     g_circularProgressBacker = null;
-    g_progressElement = null;
+    g_snipeAbilityPanel = null;
+    g_snipeChargePanel = null;
+    g_snipeChargeIcons = [];
+    g_snipeChargeImages = [];
+    g_snipeChargeTextures = [];
+    g_flightSearchRoot = null;
+    ResetFlightLookup();
+    g_altimeterDisplay.DropRefs();
+  }
 
-    g_lastOpacity = -1.0;
-    g_lastSnipeActiveState = false;
-    SetScopeBeepLoop(null, 0.0);
-    g_isNativeHidden = false;
-    g_isMaskHidden = false;
-    g_prevRawProgress = 0.0;
+  function SetOpacityIfValid(panel, opacity) {
+    if (IsValidPanel(panel)) panel.style.opacity = opacity;
+  }
+
+  function HideOverlay() {
+    if (IsValidPanel(g_scopeImg)) {
+      g_scopeImg.style.backgroundImage = null;
+      g_scopeImg.style.washColor = null;
+      g_scopeImg.style.imgShadow = null;
+    }
+    SetOpacityIfValid(g_chevronLeft, "0.0");
+    SetOpacityIfValid(g_chevronRight, "0.0");
+    SetOpacityIfValid(g_statusLock, "0.0");
+    SetOpacityIfValid(g_statusFire, "0.0");
+    SetOpacityIfValid(g_ladderLeft, "0.0");
+    SetOpacityIfValid(g_ladderRight, "0.0");
+    if (IsValidPanel(g_compassPanel)) g_compassPanel.DeleteAsync(0);
+    g_compassPanel = null;
+    g_altimeterDisplay.Hide();
+    HideSnipeChargeIndicators();
+  }
+
+  // A previous owner may have died mid-scope, so its panels are looked up by id and hidden.
+  function AdoptExistingOverlay(root) {
+    g_scopeImg = root.FindChildTraverse("scope_img");
+    if (IsValidPanel(g_scopeImg)) {
+      g_chevronLeft = g_scopeImg.FindChildTraverse("VindictaChevronLeft");
+      g_chevronRight = g_scopeImg.FindChildTraverse("VindictaChevronRight");
+      g_statusLock = g_scopeImg.FindChildTraverse("VindictaStatusLock");
+      g_statusFire = g_scopeImg.FindChildTraverse("VindictaStatusFire");
+    }
+    g_ladderLeft = root.FindChildTraverse("VindictaLadderLeft");
+    g_ladderRight = root.FindChildTraverse("VindictaLadderRight");
+    g_compassPanel = root.FindChildTraverse("VindictaCompassTape");
+    g_altimeterDisplay.GetOrCreate(root);
+    HideOverlay();
+  }
+
+  function BeginScopeSession(now) {
+    StopAllSounds();
+    g_session.active = true;
+    g_session.id++;
+    g_session.startTime = now;
+    g_session.lastActiveTime = now;
+    g_session.lastProgress = null;
+    g_session.armed = false;
+    g_session.firePhase = false;
+    g_altimeterDisplay.ResetWarning();
+    DropScopeCaches();
+    ResetFlightLookup();
+    LogDebug("scope session " + g_session.id + " begin");
+  }
+
+  function EndScopeSession() {
+    StopAllSounds();
+    if (g_session.active) LogDebug("scope session " + g_session.id + " end");
+    g_session.active = false;
+    g_session.firePhase = false;
+    HideOverlay();
+  }
+
+  function StandDown() {
+    if (g_isOwner || g_session.active) EndScopeSession();
+    if (g_isOwner) {
+      ReleaseOwnership();
+      LogDebug("released HUD ownership");
+    }
+    StopAllSounds();
+  }
+
+  function UpdateCrtShadow(now) {
+    if (g_lastFlickerTime && (now - g_lastFlickerTime) <= 30) return;
+    g_lastFlickerTime = now;
+    var baseBlur = 7.0;
+    var blurJitter = (Math.random() * 1.6) - 0.8;
+    var currentBlur = (baseBlur + blurJitter).toFixed(1);
+    var flickerAlpha = (Math.random() > 0.88) ? "E6" : "FF";
+    g_cachedCrtShadow = "0px 0px " + currentBlur + "px 1.0 #39FF14" + flickerAlpha;
+  }
+
+  // Hysteresis keeps a small dip in charge from flipping LOCK and FIRE back and forth.
+  function UpdateLockState(progress, now) {
+    var session = g_session;
+    if (progress === null) progress = session.lastProgress;
+    session.lastProgress = progress;
+    if (progress === null) return { closure: 0.0, fire: false };
+
+    // A high reading right after scope-in can be left over from the previous scope.
+    if (!session.armed && (progress < FIRE_EXIT_PROGRESS || (now - session.startTime) >= LOCK_ARM_DELAY_MS)) {
+      session.armed = true;
+    }
+    if (!session.armed) return { closure: 0.0, fire: false };
+
+    if (session.firePhase ? progress < FIRE_EXIT_PROGRESS : progress >= FIRE_ENTER_PROGRESS) {
+      session.firePhase = !session.firePhase;
+      LogDebug("lock phase " + (session.firePhase ? "FIRE" : "LOCK") + " at progress " + progress.toFixed(3));
+    }
+    return { closure: Math.max(0.0, Math.min(1.0, progress)), fire: session.firePhase };
+  }
+
+  function DrawScopeOverlay(scopeImg, lockState, now) {
+    var chevrons = GetOrCreateChevronPanels(scopeImg);
+    var statusText = GetOrCreateStatusPanels(scopeImg);
+    var MAX_PIXEL_OFFSET = 180;
+    var currentOffset = (MAX_PIXEL_OFFSET * (1.0 - lockState.closure)).toFixed(1);
+
+    scopeImg.style.backgroundImage = "url('s2r://panorama/images/hud/crosshair/Crosshair_psd.vtex')";
+    scopeImg.style.washColor = "#00FF66";
+    scopeImg.style.imgShadow = g_cachedCrtShadow;
+
+    chevrons.left.style.washColor = "#00FF66";
+    chevrons.right.style.washColor = "#00FF66";
+    chevrons.left.style.imgShadow = g_cachedCrtShadow;
+    chevrons.right.style.imgShadow = g_cachedCrtShadow;
+    chevrons.left.style.opacity = "1.0";
+    chevrons.right.style.opacity = "1.0";
+    chevrons.left.style.transform = "translateX(-" + currentOffset + "px)";
+    chevrons.right.style.transform = "translateX(" + currentOffset + "px)";
+
+    if (lockState.fire) {
+      statusText.fire.style.washColor = "#00FF66";
+      statusText.fire.style.imgShadow = g_cachedCrtShadow;
+      statusText.fire.style.opacity = (now % 250) < 125 ? "1.0" : "0.0";
+      statusText.lock.style.opacity = "0.0";
+    } else {
+      statusText.lock.style.washColor = "#00FF66";
+      statusText.lock.style.imgShadow = g_cachedCrtShadow;
+      statusText.lock.style.opacity = (now % 350) < 175 ? "1.0" : "0.0";
+      statusText.fire.style.opacity = "0.0";
+    }
+  }
+
+  function DrawCompass(root) {
+    var compass = GetOrCreateCompassPanel(root);
+
+    var currentYaw = GetMinimapYaw(root) + 90.0;
+    if (currentYaw > 180) currentYaw -= 360;
+    if (currentYaw < -180) currentYaw += 360;
+
+    var TOTAL_DEGREES = 720;
+    var IMAGE_WIDTH_PX = 4872;
+    var PX_PER_DEGREE = IMAGE_WIDTH_PX / TOTAL_DEGREES;
+    var compassOffsetPx = currentYaw * PX_PER_DEGREE;
+
+    var panelWidth = compass.actuallayoutwidth;
+    if (!panelWidth || panelWidth <= 0) panelWidth = 1075;
+
+    var centerBaseX = (panelWidth / 2.0) - (IMAGE_WIDTH_PX / 2.0);
+    var finalBgX = centerBaseX - compassOffsetPx;
+
+    compass.style.washColor = "#00FF66";
+    compass.visible = true;
+    compass.style.visibility = "visible";
+    compass.style.opacity = "1.0";
+    compass.style.backgroundPosition = finalBgX.toFixed(1) + "px 0px";
+  }
+
+  function DrawLadders(root, now) {
+    var ladders = GetOrCreateLadderPanels(root);
+    var timeSec = now / 1000.0;
+    var driftY = ((Math.sin(timeSec * 0.7) * 70) + (Math.cos(timeSec * 0.35) * 50)).toFixed(1);
+
+    ladders.left.style.washColor = "#00FF66";
+    ladders.right.style.washColor = "#00FF66";
+    ladders.left.style.imgShadow = g_cachedCrtShadow;
+    ladders.right.style.imgShadow = g_cachedCrtShadow;
+    ladders.left.visible = true;
+    ladders.right.visible = true;
+    ladders.left.style.visibility = "visible";
+    ladders.right.style.visibility = "visible";
+    ladders.left.style.opacity = "1.0";
+    ladders.right.style.opacity = "1.0";
+    ladders.left.style.transform = "translateX(-30%) translateY(" + driftY + "px)";
+    ladders.right.style.transform = "translateX(30%) translateY(" + driftY + "px)";
+  }
+
+  function UpdateAltimeter(root, now) {
+    g_altimeterDisplay.GetOrCreate(root);
+    var flightRatio = ReadFlightDurationProgress(FindFlightDurationLabel(root, now));
+    // A cancelled flight can leave the timer frozen mid-way, so only a moving timer counts as flying.
+    if (flightRatio !== g_flightLastRatio) {
+      if (g_flightLastRatio !== null && flightRatio !== null) g_flightLastChangeTime = now;
+      g_flightLastRatio = flightRatio;
+    }
+    var isAdvancing = g_flightLastChangeTime > 0 && (now - g_flightLastChangeTime) < FLIGHT_STALE_MS;
+    var isFlying = isAdvancing && flightRatio !== null && flightRatio > 0.0 && flightRatio < 1.0;
+    g_altimeterDisplay.Update(isFlying ? Math.floor((1.0 - flightRatio) * 9999) : 0, g_cachedCrtShadow);
+    return { ratio: flightRatio, flying: isFlying };
+  }
+
+  function OwnerTick(root, panels, now) {
+    g_stage = "scope-state";
+    var slotActive = IsSnipeAbilityActive(root);
+    if (slotActive) g_session.lastActiveTime = now;
+    var scopeActive = slotActive || (g_session.active && (now - g_session.lastActiveTime) < SCOPE_END_GRACE_MS);
+    if (scopeActive && !g_session.active) BeginScopeSession(now);
+    if (!scopeActive && g_session.active) EndScopeSession();
+
+    UpdateCrtShadow(now);
+
+    g_stage = "charges";
+    UpdateSnipeChargeIndicators(root, g_session.active);
+    if (!g_session.active) return IDLE_INTERVAL;
+
+    g_stage = "scope_img";
+    var scopeImg = GetScopeImg(root);
+    if (!IsValidPanel(scopeImg)) {
+      HideOverlay();
+      StopAllSounds();
+      return IDLE_INTERVAL;
+    }
+
+    g_stage = "lock";
+    var progress = IsValidPanel(panels.progress) ? ReadProgressValue(panels.progress) : null;
+    var lockState = UpdateLockState(progress, now);
+
+    g_stage = "overlay";
+    DrawScopeOverlay(scopeImg, lockState, now);
+
+    g_stage = "compass";
+    DrawCompass(root);
+
+    g_stage = "ladders";
+    DrawLadders(root, now);
+
+    g_stage = "altimeter";
+    var flight = UpdateAltimeter(root, now);
+
+    g_stage = "sounds";
+    SetChannel(g_scopeChannel,
+               lockState.fire ? SCOPE_FIRE_SOUND : SCOPE_LOCK_SOUND,
+               lockState.fire ? FIRE_BEEP_INTERVAL : SCOPE_BEEP_INTERVAL);
+    ServiceChannel(g_scopeChannel, now);
+    ServiceChannel(g_warningChannel, now);
+
+    if (DEBUG && (now - g_lastDebugLogTime) >= DEBUG_LOG_INTERVAL * 1000) {
+      g_lastDebugLogTime = now;
+      LogDebug("session=" + g_session.id +
+               " progress=" + (progress === null ? "none" : progress.toFixed(3)) +
+               " fire=" + lockState.fire +
+               " flight=" + (flight.ratio === null ? "none" : flight.ratio.toFixed(3)) +
+               " flying=" + flight.flying +
+               " leaping=" + HasPanelClass(g_flightElement, "leaping"));
+    }
+    return ACTIVE_INTERVAL;
+  }
+
+  function Tick(now) {
+    g_stage = "hud-root";
+    var root = GetHudRoot();
+    if (!root) {
+      StandDown();
+      return IDLE_INTERVAL;
+    }
+
+    g_stage = "identity";
+    var strength = GetElementStrength();
+    var panels = GetLocalProgressPanels();
+    if (strength > 0) {
+      HideNativeProgress(panels.progress, panels.backer);
+    } else {
+      RestoreNativeProgress(panels.progress, panels.backer);
+    }
+
+    g_stage = "ownership";
+    var isOwner = strength > 0 && ClaimOwnership(root, strength, now);
+    if (DEBUG) {
+      var state = "strength=" + strength + " owner=" + isOwner;
+      if (state !== g_lastDebugState) {
+        g_lastDebugState = state;
+        LogDebug(state + " element=" + g_progressElement.id + " classes=" + DescribeElementClasses());
+      }
+    }
+    if (!isOwner) {
+      StandDown();
+      return IDLE_INTERVAL;
+    }
+    if (!g_isOwner) {
+      g_isOwner = true;
+      LogDebug("took HUD ownership");
+      AdoptExistingOverlay(root);
+    }
+    return OwnerTick(root, panels, now);
+  }
+
+  function RecoverFromException() {
+    StopAllSounds();
+    try {
+      if (g_isOwner) HideOverlay();
+    } catch (e) {}
+    g_isOwner = false;
+    g_session.active = false;
+    g_session.firePhase = false;
+    DropPanelCaches();
+  }
+
+  function Shutdown() {
+    if (g_isShutDown) return;
+    g_isShutDown = true;
+    if (g_schedulerId !== null) {
+      try { $.CancelScheduled(g_schedulerId); } catch (e) {}
+      g_schedulerId = null;
+    }
+    StopAllSounds();
+    try {
+      if (g_isOwner) HideOverlay();
+    } catch (e) {}
+    ReleaseOwnership();
+    g_session.active = false;
+    DropPanelCaches();
+    LogDebug("shut down");
+  }
+
+  function SyncLoop() {
+    g_schedulerId = null;
+    if (g_isShutDown) return;
+    // A deleted element never comes back, so this copy stops instead of running on as an orphan.
+    if (!IsValidPanel(g_progressElement)) {
+      Shutdown();
+      return;
+    }
+
+    var nextInterval = IDLE_INTERVAL;
+    try {
+      nextInterval = Tick(Date.now());
+    } catch (e) {
+      ReportException(e);
+      RecoverFromException();
+    }
+
+    try {
+      g_schedulerId = $.Schedule(nextInterval, SyncLoop);
+    } catch (e) {
+      Shutdown();
+    }
   }
 
   if (typeof $ !== "undefined" && $.RegisterForUnload) {
-    $.RegisterForUnload(Cleanup);
+    $.RegisterForUnload(Shutdown);
   }
 
   SyncLoop();

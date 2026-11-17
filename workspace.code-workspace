@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../refrence"
+		},
+		{
+			"path": "../core.pak01"
+		},
+		{
+			"path": "../../../game/citadel"
+		}
+	],
+	"settings": {}
+}
